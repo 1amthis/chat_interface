@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# zip files and archives
+*.zip
+*.Zone.Identifier
+
+# temporary directories
+mcp_app/

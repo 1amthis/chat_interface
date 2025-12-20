@@ -1,0 +1,343 @@
+export type Provider = 'openai' | 'anthropic' | 'google' | 'ollama';
+
+export interface Attachment {
+  id: string;
+  type: 'image' | 'file';
+  name: string;
+  mimeType: string;
+  data: string; // base64 encoded data
+  size: number;
+}
+
+export interface ProjectFile {
+  id: string;
+  type: 'image' | 'file';
+  name: string;
+  mimeType: string;
+  data: string; // base64 encoded
+  size: number;
+  addedAt: number;
+}
+
+// Content blocks allow interleaving text, reasoning, and tool calls in the correct order
+export interface TextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface ReasoningContentBlock {
+  type: 'reasoning';
+  reasoning: string;
+}
+
+export interface ToolCallContentBlock {
+  type: 'tool_call';
+  toolCall: ToolCall;
+}
+
+// Artifact Types
+export type ArtifactType = 'code' | 'html' | 'react' | 'markdown' | 'svg' | 'mermaid';
+
+export interface ArtifactVersion {
+  id: string;
+  content: string;
+  createdAt: number;
+}
+
+export interface Artifact {
+  id: string;
+  type: ArtifactType;
+  title: string;
+  content: string;
+  language?: string; // For code artifacts (javascript, python, etc.)
+  versions: ArtifactVersion[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ArtifactContentBlock {
+  type: 'artifact';
+  artifactId: string;
+}
+
+export type ContentBlock = TextContentBlock | ReasoningContentBlock | ToolCallContentBlock | ArtifactContentBlock;
+
+export interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string; // Legacy: combined text content for backwards compatibility
+  contentBlocks?: ContentBlock[]; // New: ordered content blocks with interleaved tool calls
+  attachments?: Attachment[];
+  toolCalls?: ToolCall[]; // Legacy: kept for backwards compatibility
+  reasoning?: string; // Reasoning/thinking content from models like o3-mini, o1
+  timestamp: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: number;
+  instructions?: string;
+  files?: ProjectFile[];
+  provider?: Provider;
+  model?: string;
+}
+
+/** @deprecated Use Project instead */
+export type Folder = Project;
+
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: Message[];
+  artifacts?: Artifact[]; // Artifacts created in this conversation
+  provider: Provider;
+  model: string;
+  systemPrompt?: string;
+  projectId?: string;
+  folderId?: string; // @deprecated - kept for migration
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProviderConfig {
+  provider: Provider;
+  apiKey?: string;
+  baseUrl?: string;
+  model: string;
+}
+
+export type Theme = 'light' | 'dark' | 'system';
+
+// MCP (Model Context Protocol) Types - defined early for use in ChatSettings
+
+export type MCPTransport = 'stdio' | 'sse' | 'streamable-http' | 'http';
+
+export interface MCPServerConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  transport: MCPTransport;
+  // For stdio transport
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  // For SSE and Streamable HTTP transports
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+export type ToolSource = 'builtin' | 'mcp' | 'web_search' | 'google_drive';
+
+export interface BuiltinToolsConfig {
+  filesystem?: {
+    enabled: boolean;
+    allowedPaths?: string[];
+  };
+  shell?: {
+    enabled: boolean;
+    allowedCommands?: string[];
+  };
+  fetch?: {
+    enabled: boolean;
+    allowedDomains?: string[];
+  };
+}
+
+export interface ChatSettings {
+  provider: Provider;
+  model: string;
+  openaiKey?: string;
+  anthropicKey?: string;
+  anthropicThinkingEnabled?: boolean;
+  anthropicThinkingBudgetTokens?: number;
+  googleKey?: string;
+  ollamaUrl: string;
+  systemPrompt?: string;
+  theme: Theme;
+  webSearchEnabled?: boolean;
+  tavilyApiKey?: string;
+  braveApiKey?: string;
+  // Google Drive settings
+  googleDriveEnabled?: boolean;
+  googleDriveAccessToken?: string;
+  googleDriveRefreshToken?: string;
+  googleDriveTokenExpiry?: number;
+  // MCP settings
+  mcpEnabled?: boolean;
+  mcpServers?: MCPServerConfig[];
+  builtinTools?: BuiltinToolsConfig;
+}
+
+export const DEFAULT_MODELS: Record<Provider, string[]> = {
+  openai: [
+    'gpt-5',
+    'gpt-5.1',
+    'gpt-5.2',
+    'gpt-5-mini',
+    'gpt-5-nano',
+  ],
+  anthropic: [
+    'claude-sonnet-4-5',
+    'claude-opus-4-5',
+    'claude-haiku-4-5',
+    'claude-sonnet-4-5-20250929',
+    'claude-opus-4-5-20251101',
+    'claude-haiku-4-5-20251001',
+  ],
+  google: [
+    'gemini-3-pro-preview',
+    'gemini-3-flash-preview',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+  ],
+  ollama: [
+    'llama3.3',
+    'llama3.2',
+    'llama3.1',
+    'qwen2.5',
+    'mistral',
+    'codellama',
+    'deepseek-coder-v2',
+    'phi3',
+  ],
+};
+
+export const DEFAULT_SETTINGS: ChatSettings = {
+  provider: 'openai',
+  model: 'gpt-5',
+  ollamaUrl: 'http://localhost:11434',
+  theme: 'system',
+  anthropicThinkingEnabled: false,
+  anthropicThinkingBudgetTokens: 1024,
+};
+
+export const PROJECT_COLORS = [
+  '#ef4444', // red
+  '#f97316', // orange
+  '#eab308', // yellow
+  '#22c55e', // green
+  '#14b8a6', // teal
+  '#3b82f6', // blue
+  '#8b5cf6', // violet
+  '#ec4899', // pink
+];
+
+/** @deprecated Use PROJECT_COLORS */
+export const FOLDER_COLORS = PROJECT_COLORS;
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedTokens?: number;
+  reasoningTokens?: number;
+}
+
+// Web Search Types
+export interface WebSearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+  source?: string;
+}
+
+export interface WebSearchResponse {
+  query: string;
+  results: WebSearchResult[];
+  timestamp: number;
+}
+
+// Tool Call Types for visualization
+export type ToolCallStatus = 'pending' | 'running' | 'completed' | 'error';
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  params: Record<string, unknown>;
+  status: ToolCallStatus;
+  result?: unknown;
+  error?: string;
+  startedAt: number;
+  completedAt?: number;
+  source?: ToolSource;
+  serverId?: string; // For MCP tools
+}
+
+export interface MessageToolCalls {
+  toolCalls: ToolCall[];
+}
+
+// Google Drive Types
+export interface GoogleDriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime: string;
+  webViewLink?: string;
+  iconLink?: string;
+  owners?: Array<{ displayName: string; emailAddress: string }>;
+  size?: string;
+}
+
+export interface GoogleDriveSearchResult {
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  modifiedTime: string;
+  webViewLink: string;
+  snippet?: string;
+  owner?: string;
+  size?: string;
+}
+
+export interface GoogleDriveSearchResponse {
+  query: string;
+  results: GoogleDriveSearchResult[];
+  timestamp: number;
+}
+
+// Additional MCP Types
+
+export interface UnifiedTool {
+  source: ToolSource;
+  serverId?: string; // For MCP tools, which server provides this
+  name: string;
+  description: string;
+  parameters: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+export interface MCPToolResult {
+  content: Array<{
+    type: 'text' | 'image' | 'resource';
+    text?: string;
+    data?: string;
+    mimeType?: string;
+  }>;
+  isError?: boolean;
+}
+
+export interface MCPServerStatus {
+  id: string;
+  name: string;
+  connected: boolean;
+  toolCount: number;
+  error?: string;
+}
+
+// MCP Tool Result for passing back to the model
+export interface MCPToolResultContext {
+  toolName: string;
+  result: string;
+  isError: boolean;
+  source: ToolSource;
+  serverId?: string;
+}
