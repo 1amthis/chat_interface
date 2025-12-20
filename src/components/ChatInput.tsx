@@ -3,6 +3,13 @@
 import { useState, useRef, useEffect, KeyboardEvent, ChangeEvent } from 'react';
 import { Attachment } from '@/types';
 import { generateId } from '@/lib/storage';
+import {
+  formatFileSize,
+  fileToBase64,
+  isImageType,
+  MAX_FILE_SIZE,
+  ACCEPTED_FILE_TYPES,
+} from '@/lib/utils';
 
 interface ChatInputProps {
   onSend: (message: string, attachments: Attachment[]) => void;
@@ -15,17 +22,6 @@ interface ChatInputProps {
   googleDriveConnected?: boolean;
   onPickDriveFile?: () => void;
 }
-
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-const ACCEPTED_FILE_TYPES = [
-  'text/plain',
-  'text/markdown',
-  'text/csv',
-  'application/json',
-  'application/pdf',
-  ...ACCEPTED_IMAGE_TYPES,
-];
 
 export function ChatInput({
   onSend,
@@ -97,11 +93,10 @@ export function ChatInput({
       }
 
       const base64 = await fileToBase64(file);
-      const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
 
       newAttachments.push({
         id: generateId(),
-        type: isImage ? 'image' : 'file',
+        type: isImageType(file.type) ? 'image' : 'file',
         name: file.name,
         mimeType: file.type,
         data: base64,
@@ -118,27 +113,8 @@ export function ChatInput({
     }
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
-
   const removeAttachment = (id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   const handlePaste = async (e: React.ClipboardEvent) => {

@@ -1,4 +1,5 @@
 import { Conversation, ChatSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, Folder, Project } from '@/types';
+import { STORAGE_LIMITS } from './constants';
 
 const CONVERSATIONS_KEY = 'chat_conversations';
 const SETTINGS_KEY = 'chat_settings';
@@ -6,10 +7,8 @@ const FOLDERS_KEY = 'chat_folders';
 const PROJECTS_KEY = 'chat_projects';
 const MIGRATION_KEY = 'chat_migration_v1';
 
-// Storage size limits (in bytes)
-const MAX_STORAGE_SIZE = 4 * 1024 * 1024; // 4MB (safe limit, browsers typically allow 5-10MB)
-const MAX_CONVERSATION_SIZE = 500 * 1024; // 500KB per conversation
-const MAX_CONVERSATIONS = 50; // Maximum number of conversations to keep
+// Destructure storage limits for convenience
+const { MAX_TOTAL_SIZE: MAX_STORAGE_SIZE, MAX_CONVERSATION_SIZE, MAX_CONVERSATIONS } = STORAGE_LIMITS;
 
 /**
  * Migrate folders to projects (one-time migration)

@@ -5,6 +5,7 @@ import { Message, Attachment, ContentBlock, Artifact, ReasoningContentBlock } fr
 import { MarkdownMessage } from './MarkdownMessage';
 import ToolCallDisplay from './ToolCallDisplay';
 import { ArtifactCard } from './ArtifactCard';
+import { formatFileSize } from '@/lib/utils';
 
 // Reasoning display component for o-series models
 function ReasoningDisplay({ reasoning, isStreaming }: { reasoning: string; isStreaming?: boolean }) {
@@ -107,12 +108,6 @@ interface ChatMessageProps {
 }
 
 function AttachmentPreview({ attachment }: { attachment: Attachment }) {
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  };
-
   if (attachment.type === 'image') {
     return (
       <div className="mt-2 rounded-lg overflow-hidden inline-block max-w-md">

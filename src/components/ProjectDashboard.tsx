@@ -4,6 +4,14 @@ import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { Project, Conversation, ProjectFile, Attachment } from '@/types';
 import { generateId } from '@/lib/storage';
 import { ChatInput } from './ChatInput';
+import {
+  formatFileSize,
+  formatRelativeTime,
+  fileToBase64,
+  isImageType,
+  MAX_FILE_SIZE,
+  ACCEPTED_FILE_TYPES,
+} from '@/lib/utils';
 
 interface ProjectDashboardProps {
   project: Project;
@@ -22,17 +30,6 @@ interface ProjectDashboardProps {
   googleDriveConnected?: boolean;
   onPickDriveFile?: () => void;
 }
-
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
-const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
-const ACCEPTED_FILE_TYPES = [
-  ...ACCEPTED_IMAGE_TYPES,
-  'text/plain',
-  'text/markdown',
-  'text/csv',
-  'application/json',
-  'application/pdf',
-];
 
 export function ProjectDashboard({
   project,
@@ -82,19 +79,6 @@ export function ProjectDashboard({
     };
   }, [instructions, project.instructions, onUpdateInstructions]);
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
-
   const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
@@ -113,11 +97,10 @@ export function ProjectDashboard({
       }
 
       const base64 = await fileToBase64(file);
-      const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
 
       newFiles.push({
         id: generateId(),
-        type: isImage ? 'image' : 'file',
+        type: isImageType(file.type) ? 'image' : 'file',
         name: file.name,
         mimeType: file.type,
         data: base64,
@@ -139,26 +122,6 @@ export function ProjectDashboard({
     const updatedFiles = (project.files || []).filter(f => f.id !== fileId);
     onUpdateFiles(updatedFiles.length > 0 ? updatedFiles : undefined);
     setDeleteConfirm(null);
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  };
-
-  const formatRelativeTime = (timestamp: number): string => {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const seconds = Math.floor(diff / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
-    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-    return 'Just now';
   };
 
   const sortedConversations = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt);

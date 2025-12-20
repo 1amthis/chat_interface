@@ -341,3 +341,133 @@ export interface MCPToolResultContext {
   source: ToolSource;
   serverId?: string;
 }
+
+// Tool Parameter Types (replacing generic Record<string, unknown>)
+export interface WebSearchParams {
+  query: string;
+}
+
+export interface GoogleDriveSearchParams {
+  query: string;
+}
+
+export interface FilesystemReadParams {
+  path: string;
+}
+
+export interface FilesystemWriteParams {
+  path: string;
+  content: string;
+}
+
+export interface ShellExecParams {
+  command: string;
+  cwd?: string;
+}
+
+export interface FetchParams {
+  url: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+// Union type for all known tool parameters
+export type KnownToolParams =
+  | WebSearchParams
+  | GoogleDriveSearchParams
+  | FilesystemReadParams
+  | FilesystemWriteParams
+  | ShellExecParams
+  | FetchParams;
+
+// Discriminated union for tool results
+export type ToolResultData =
+  | { source: 'web_search'; result: WebSearchResponse }
+  | { source: 'google_drive'; result: GoogleDriveSearchResponse }
+  | { source: 'mcp'; result: MCPToolResult }
+  | { source: 'builtin'; result: MCPToolResult };
+
+// Gemini API Types (not fully typed in SDK)
+export interface GeminiPart {
+  text?: string;
+  inlineData?: {
+    mimeType: string;
+    data: string;
+  };
+  functionCall?: {
+    name: string;
+    args: Record<string, unknown>;
+  };
+  functionResponse?: {
+    name: string;
+    response: Record<string, unknown>;
+  };
+}
+
+export interface GeminiContent {
+  role: 'user' | 'model';
+  parts: GeminiPart[];
+}
+
+export interface GeminiFunctionDeclaration {
+  name: string;
+  description: string;
+  parameters: {
+    type: string;
+    properties: Record<string, { type: string; description?: string }>;
+    required?: string[];
+  };
+}
+
+// OpenAI Responses API Types
+export interface OpenAIResponsesEvent {
+  type:
+    | 'response.created'
+    | 'response.in_progress'
+    | 'response.completed'
+    | 'response.failed'
+    | 'response.output_item.added'
+    | 'response.output_item.done'
+    | 'response.content_part.added'
+    | 'response.content_part.done'
+    | 'response.output_text.delta'
+    | 'response.output_text.done'
+    | 'response.function_call_arguments.delta'
+    | 'response.function_call_arguments.done'
+    | 'response.reasoning_summary_text.delta'
+    | 'response.reasoning_summary_text.done';
+  delta?: string;
+  output_index?: number;
+  content_index?: number;
+  item_id?: string;
+  item?: {
+    type: string;
+    id?: string;
+    status?: string;
+    content?: Array<{ type: string; text?: string }>;
+    name?: string;
+    call_id?: string;
+    arguments?: string;
+  };
+}
+
+// JSON Schema types for tool definitions
+export interface JSONSchemaProperty {
+  type: 'string' | 'number' | 'boolean' | 'object' | 'array';
+  description?: string;
+  enum?: string[];
+  items?: JSONSchemaProperty;
+  properties?: Record<string, JSONSchemaProperty>;
+  required?: string[];
+}
+
+export interface ToolSchema {
+  name: string;
+  description: string;
+  parameters: {
+    type: 'object';
+    properties: Record<string, JSONSchemaProperty>;
+    required?: string[];
+  };
+}

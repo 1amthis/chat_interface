@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Message, Conversation, ChatSettings, DEFAULT_SETTINGS, DEFAULT_MODELS, Provider, Attachment, TokenUsage, Folder, Project, ProjectFile, WebSearchResponse, GoogleDriveSearchResponse, ToolCall, ToolSource, ContentBlock, Artifact, ArtifactContentBlock, ReasoningContentBlock } from '@/types';
+import { Message, Conversation, ChatSettings, DEFAULT_SETTINGS, DEFAULT_MODELS, Provider, Attachment, TokenUsage, Project, WebSearchResponse, GoogleDriveSearchResponse, ToolCall, ToolSource, ContentBlock, Artifact, ArtifactContentBlock, ReasoningContentBlock } from '@/types';
 import type { ToolExecutionResult } from '@/lib/providers';
 import {
   getConversations,
@@ -12,16 +12,10 @@ import {
   generateId,
   generateTitle,
   getProjects,
-  saveProject,
-  deleteProject as deleteProjectStorage,
-  updateConversationProject,
 } from '@/lib/storage';
 import { mergeSystemPrompts } from '@/lib/providers';
-import {
-  createStreamingState,
-  processStreamingChunk,
-  StreamingArtifactState,
-} from '@/lib/artifact-parser';
+import { processStreamingChunk } from '@/lib/artifact-parser';
+import { MAX_TOOL_RECURSION_DEPTH } from '@/lib/constants';
 import { Sidebar } from './Sidebar';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
@@ -31,8 +25,15 @@ import { ThinkingIndicator } from './ThinkingIndicator';
 import { ProjectDashboard } from './ProjectDashboard';
 import { ArtifactPanel } from './ArtifactPanel';
 import { useTheme } from './ThemeProvider';
+import {
+  useArtifacts,
+  useProjects,
+  useToolExecution,
+  useScrollManagement,
+} from '@/hooks';
 
 export function Chat() {
+  // Core state
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
@@ -47,22 +48,66 @@ export function Chat() {
     outputTokens: 0,
     totalTokens: 0,
   });
-  const [searchStatus, setSearchStatus] = useState<string | null>(null);
   const [currentToolCalls, setCurrentToolCalls] = useState<ToolCall[]>([]);
   const [streamingContentBlocks, setStreamingContentBlocks] = useState<ContentBlock[]>([]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingMessageRef = useRef<HTMLDivElement>(null);
-  const mainRef = useRef<HTMLElement>(null);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const { setTheme } = useTheme();
 
-  // Artifact panel state
-  const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
-  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
-  const [artifactPanelWidth, setArtifactPanelWidth] = useState(40); // percentage
-  const artifactParseStateRef = useRef<StreamingArtifactState>(createStreamingState());
-  const streamingArtifactsRef = useRef<Artifact[]>([]);
+  // Custom hooks
+  const {
+    messagesEndRef,
+    mainRef,
+    showScrollToBottom,
+    scrollToBottom,
+  } = useScrollManagement();
+
+  const {
+    artifactPanelOpen,
+    selectedArtifactId,
+    artifactPanelWidth,
+    artifactParseStateRef,
+    streamingArtifactsRef,
+    handleSelectArtifact,
+    handleCloseArtifactPanel,
+    handleRenameArtifact,
+    handleDownloadArtifact,
+    setArtifactPanelWidth,
+    resetArtifactPanel,
+    resetStreamingState,
+  } = useArtifacts({
+    currentConversation,
+    setCurrentConversation,
+    setConversations,
+  });
+
+  const {
+    handleCreateProject,
+    handleDeleteProject,
+    handleRenameProject,
+    handleUpdateProjectInstructions,
+    handleUpdateProjectFiles,
+    handleUpdateProjectProviderModel,
+    handleMoveToProject,
+  } = useProjects({
+    projects,
+    setProjects,
+    setConversations,
+    currentConversation,
+    setCurrentConversation,
+  });
+
+  const {
+    searchStatus,
+    setSearchStatus,
+    performSearch,
+    performDriveSearch,
+    performMCPToolCall,
+    generateToolCallId,
+  } = useToolExecution({
+    settings,
+    setSettings,
+  });
 
   useEffect(() => {
     setConversations(getConversations());
@@ -88,20 +133,6 @@ export function Chat() {
     }
   }, []);
 
-  // Helper to check if scrolled near bottom
-  const isNearBottom = useCallback(() => {
-    const main = mainRef.current;
-    if (!main) return true;
-    const threshold = 100;
-    return main.scrollHeight - main.scrollTop - main.clientHeight < threshold;
-  }, []);
-
-  // Scroll to bottom helper
-  const scrollToBottom = useCallback((smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
-    setShowScrollToBottom(false);
-  }, []);
-
   // Scroll to bottom when selecting a conversation
   const prevConversationId = useRef<string | null>(null);
   useEffect(() => {
@@ -114,29 +145,14 @@ export function Chat() {
     }
   }, [currentConversation, isLoading, scrollToBottom]);
 
-  // Detect scrolling to show/hide scroll to bottom button
-  useEffect(() => {
-    const main = mainRef.current;
-    if (!main) return;
-
-    const handleScroll = () => {
-      setShowScrollToBottom(!isNearBottom());
-    };
-
-    main.addEventListener('scroll', handleScroll);
-    return () => main.removeEventListener('scroll', handleScroll);
-  }, [isNearBottom]);
-
   const handleNewChat = useCallback(() => {
     setCurrentProjectId(null);
     setCurrentConversation(null);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    // Close artifact panel when starting new chat
-    setArtifactPanelOpen(false);
-    setSelectedArtifactId(null);
-  }, []);
+    resetArtifactPanel();
+  }, [resetArtifactPanel]);
 
   const handleNewChatInProject = useCallback((projectId: string) => {
     // Get project to check for project-specific provider/model
@@ -161,10 +177,8 @@ export function Chat() {
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    // Close artifact panel when starting new chat in project
-    setArtifactPanelOpen(false);
-    setSelectedArtifactId(null);
-  }, [projects, settings.provider, settings.model]);
+    resetArtifactPanel();
+  }, [projects, settings.provider, settings.model, resetArtifactPanel]);
 
   const handleSelectConversation = useCallback((id: string) => {
     const conv = conversations.find((c) => c.id === id);
@@ -174,11 +188,9 @@ export function Chat() {
       setStreamingContent('');
       setLastUsage(null);
       setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-      // Close artifact panel when switching conversations
-      setArtifactPanelOpen(false);
-      setSelectedArtifactId(null);
+      resetArtifactPanel();
     }
-  }, [conversations]);
+  }, [conversations, resetArtifactPanel]);
 
   const handleDeleteConversation = useCallback((id: string) => {
     deleteConversation(id);
@@ -237,264 +249,14 @@ export function Chat() {
     alert('Google Drive file picker coming soon! For now, use the Google Drive search feature to find and reference files in your conversations.');
   }, []);
 
-  // Project handlers
-  const handleCreateProject = useCallback((name: string, color: string) => {
-    const project: Project = {
-      id: generateId(),
-      name,
-      color,
-      createdAt: Date.now(),
-    };
-    saveProject(project);
-    setProjects(getProjects());
-  }, []);
-
-  const handleDeleteProject = useCallback((id: string) => {
-    deleteProjectStorage(id);
-    setProjects(getProjects());
-    setConversations(getConversations());
-  }, []);
-
-  const handleRenameProject = useCallback((id: string, name: string) => {
-    const project = projects.find((p) => p.id === id);
-    if (project) {
-      saveProject({ ...project, name });
-      setProjects(getProjects());
-    }
-  }, [projects]);
-
-  const handleUpdateProjectInstructions = useCallback((id: string, instructions: string | undefined) => {
-    const project = projects.find((p) => p.id === id);
-    if (project) {
-      saveProject({ ...project, instructions });
-      setProjects(getProjects());
-    }
-  }, [projects]);
-
-  const handleUpdateProjectFiles = useCallback((id: string, files: ProjectFile[] | undefined) => {
-    const project = projects.find((p) => p.id === id);
-    if (project) {
-      saveProject({ ...project, files });
-      setProjects(getProjects());
-    }
-  }, [projects]);
-
-  const handleUpdateProjectProviderModel = useCallback((id: string, provider: Provider | undefined, model: string | undefined) => {
-    const project = projects.find((p) => p.id === id);
-    if (project) {
-      saveProject({ ...project, provider, model });
-      setProjects(getProjects());
-    }
-  }, [projects]);
-
-  const handleMoveToProject = useCallback((conversationId: string, projectId: string | undefined) => {
-    updateConversationProject(conversationId, projectId);
-    setConversations(getConversations());
-    if (currentConversation?.id === conversationId) {
-      setCurrentConversation((prev) => prev ? { ...prev, projectId } : null);
-    }
-  }, [currentConversation?.id]);
-
   const handleSelectProject = useCallback((projectId: string) => {
     setCurrentProjectId(projectId);
     setCurrentConversation(null);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    // Close artifact panel when switching to project
-    setArtifactPanelOpen(false);
-    setSelectedArtifactId(null);
-  }, []);
-
-  // Artifact handlers
-  const handleSelectArtifact = useCallback((artifactId: string) => {
-    setSelectedArtifactId(artifactId);
-    setArtifactPanelOpen(true);
-  }, []);
-
-  const handleCloseArtifactPanel = useCallback(() => {
-    setArtifactPanelOpen(false);
-  }, []);
-
-  const handleRenameArtifact = useCallback((artifactId: string, newTitle: string) => {
-    if (!currentConversation) return;
-    const updatedArtifacts = currentConversation.artifacts?.map(a =>
-      a.id === artifactId
-        ? { ...a, title: newTitle, updatedAt: Date.now() }
-        : a
-    );
-    const updatedConv = { ...currentConversation, artifacts: updatedArtifacts, updatedAt: Date.now() };
-    setCurrentConversation(updatedConv);
-    saveConversation(updatedConv);
-    setConversations(getConversations());
-  }, [currentConversation]);
-
-  const handleDownloadArtifact = useCallback((artifact: Artifact) => {
-    // Download handled in ArtifactPanel - this is just for tracking if needed
-    console.log('Downloaded artifact:', artifact.title);
-  }, []);
-
-  // Perform web search with retry logic
-  const performSearch = useCallback(async (query: string, retries = 2): Promise<WebSearchResponse | null> => {
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        setSearchStatus(`Searching: "${query}"${attempt > 0 ? ` (retry ${attempt})` : ''}`);
-
-        const response = await fetch('/api/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query,
-            tavilyApiKey: settings.tavilyApiKey,
-            braveApiKey: settings.braveApiKey,
-          }),
-        });
-
-        if (!response.ok) {
-          // Try to get error details from response
-          let errorDetail = '';
-          try {
-            const errorJson = await response.json();
-            errorDetail = errorJson.error || '';
-          } catch {
-            // Ignore JSON parse errors
-          }
-          throw new Error(`Search failed: ${response.status}${errorDetail ? ` - ${errorDetail}` : ''}`);
-        }
-
-        const result = await response.json();
-        setSearchStatus(null);
-        return result as WebSearchResponse;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error('Unknown error');
-        console.error(`Search attempt ${attempt + 1} failed:`, error);
-
-        // Wait before retry (exponential backoff)
-        if (attempt < retries) {
-          await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
-        }
-      }
-    }
-
-    console.error('Search error after all retries:', lastError);
-    setSearchStatus(null);
-    return null;
-  }, [settings.tavilyApiKey, settings.braveApiKey]);
-
-  // Perform Google Drive search with retry logic
-  const performDriveSearch = useCallback(async (query: string, retries = 2): Promise<GoogleDriveSearchResponse | null> => {
-    if (!settings.googleDriveAccessToken) {
-      console.error('Google Drive access token not available');
-      return null;
-    }
-
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        setSearchStatus(`Searching Drive: "${query}"${attempt > 0 ? ` (retry ${attempt})` : ''}`);
-
-        const response = await fetch('/api/drive-search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query,
-            accessToken: settings.googleDriveAccessToken,
-            refreshToken: settings.googleDriveRefreshToken,
-            tokenExpiry: settings.googleDriveTokenExpiry,
-          }),
-        });
-
-        if (!response.ok) {
-          let errorDetail = '';
-          try {
-            const errorJson = await response.json();
-            errorDetail = errorJson.error || '';
-          } catch {
-            // Ignore JSON parse errors
-          }
-          throw new Error(`Drive search failed: ${response.status}${errorDetail ? ` - ${errorDetail}` : ''}`);
-        }
-
-        const result = await response.json();
-
-        // Update tokens if refreshed
-        if (result.newAccessToken) {
-          const newSettings = {
-            ...settings,
-            googleDriveAccessToken: result.newAccessToken,
-            googleDriveTokenExpiry: result.newTokenExpiry,
-          };
-          saveSettings(newSettings);
-          setSettings(newSettings);
-        }
-
-        setSearchStatus(null);
-        return result as GoogleDriveSearchResponse;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error('Unknown error');
-        console.error(`Drive search attempt ${attempt + 1} failed:`, error);
-
-        if (attempt < retries) {
-          await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
-        }
-      }
-    }
-
-    console.error('Drive search error after all retries:', lastError);
-    setSearchStatus(null);
-    return null;
-  }, [settings]);
-
-  // Perform MCP or builtin tool call
-  const performMCPToolCall = useCallback(async (
-    toolName: string,
-    params: Record<string, unknown>,
-    source: ToolSource,
-    serverId?: string
-  ): Promise<{ result: string; isError: boolean }> => {
-    try {
-      setSearchStatus(`Running tool: ${toolName}`);
-
-      const response = await fetch('/api/mcp/call', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source,
-          serverId,
-          toolName,
-          params,
-          builtinToolsConfig: settings.builtinTools,
-          provider: settings.provider,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Tool call failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-      setSearchStatus(null);
-
-      return {
-        result: data.formattedResult || JSON.stringify(data.result, null, 2),
-        isError: data.result?.isError || false,
-      };
-    } catch (error) {
-      console.error('MCP tool call error:', error);
-      setSearchStatus(null);
-      return {
-        result: error instanceof Error ? error.message : 'Tool call failed',
-        isError: true,
-      };
-    }
-  }, [settings.builtinTools, settings.provider]);
-
-  // Helper to generate unique IDs for tool calls
-  const generateToolCallId = () => `tc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    resetArtifactPanel();
+  }, [resetArtifactPanel]);
 
   // Core function to stream a response for a given conversation
   const streamResponse = useCallback(async (
@@ -507,7 +269,6 @@ export function Chat() {
     recursionDepth: number = 0
   ): Promise<void> => {
     // Prevent infinite tool call loops
-    const MAX_TOOL_RECURSION_DEPTH = 10;
     if (recursionDepth >= MAX_TOOL_RECURSION_DEPTH) {
       console.warn(`Tool call limit reached (${MAX_TOOL_RECURSION_DEPTH} calls). Stopping to prevent infinite loop.`);
       setIsLoading(false);
@@ -1047,9 +808,7 @@ export function Chat() {
       setStreamingContent('');
       setStreamingContentBlocks([]);
       setCurrentToolCalls([]);
-      // Reset artifact streaming state
-      artifactParseStateRef.current = createStreamingState();
-      streamingArtifactsRef.current = [];
+      resetStreamingState();
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         // Capture all streaming state before clearing
@@ -1104,11 +863,9 @@ export function Chat() {
       setStreamingContentBlocks([]);
       setSearchStatus(null);
       setCurrentToolCalls([]);
-      // Reset artifact streaming state
-      artifactParseStateRef.current = createStreamingState();
-      streamingArtifactsRef.current = [];
+      resetStreamingState();
     }
-  }, [settings, projects, performSearch, performDriveSearch, performMCPToolCall]);
+  }, [settings, projects, performSearch, performDriveSearch, performMCPToolCall, resetStreamingState, artifactParseStateRef, generateToolCallId, setSearchStatus, streamingArtifactsRef]);
 
   const handleSend = useCallback(async (content: string, attachments: Attachment[] = []) => {
     const userMessage: Message = {
