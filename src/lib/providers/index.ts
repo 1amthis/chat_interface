@@ -21,12 +21,16 @@ export { mergeSystemPrompts, isOpenAIReasoningModel, generateGeminiToolCallId } 
 export {
   WEB_SEARCH_SCHEMA,
   GOOGLE_DRIVE_SCHEMA,
+  MEMORY_SEARCH_SCHEMA,
   openAIWebSearchTool,
   openAIGoogleDriveTool,
+  openAIMemorySearchTool,
   anthropicWebSearchTool,
   anthropicGoogleDriveTool,
+  anthropicMemorySearchTool,
   geminiWebSearchDeclaration,
   geminiGoogleDriveDeclaration,
+  geminiMemorySearchDeclaration,
 } from './tools/definitions';
 
 // Import provider implementations
@@ -50,6 +54,7 @@ export async function* streamChat(
   searchResults?: WebSearchResponse,
   googleDriveEnabled?: boolean,
   driveSearchResults?: GoogleDriveSearchResponse,
+  memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[]
 ): AsyncGenerator<StreamChunk> {
@@ -58,9 +63,9 @@ export async function* streamChat(
   if (provider === 'openai') {
     // Use Responses API for reasoning-capable models (gpt-5 + o-series) to get reasoning summaries
     if (isOpenAIReasoningModel(model)) {
-      yield* streamOpenAIResponses(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, mcpTools, toolExecutions);
+      yield* streamOpenAIResponses(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions);
     } else {
-      yield* streamOpenAI(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, mcpTools, toolExecutions);
+      yield* streamOpenAI(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions);
     }
   } else if (provider === 'anthropic') {
     yield* streamAnthropic(
@@ -72,6 +77,7 @@ export async function* streamChat(
       searchResults,
       googleDriveEnabled,
       driveSearchResults,
+      memorySearchEnabled,
       mcpTools,
       toolExecutions,
       settings.anthropicThinkingEnabled,
@@ -87,10 +93,12 @@ export async function* streamChat(
       searchResults,
       googleDriveEnabled,
       driveSearchResults,
+      memorySearchEnabled,
       mcpTools,
       toolExecutions
     );
   } else if (provider === 'ollama') {
+    // Ollama doesn't support tools directly, but memory search results can be passed via tool executions
     yield* streamOllama(messages, model, settings.ollamaUrl, systemPrompt, searchResults, driveSearchResults, mcpTools, toolExecutions);
   }
 }

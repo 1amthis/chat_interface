@@ -157,6 +157,15 @@ export function saveConversation(conversation: Conversation): void {
 
     // Try to save
     localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations));
+
+    // Trigger async memory search index update
+    if (typeof window !== 'undefined') {
+      import('@/lib/memory-search').then(({ updateIndex }) => {
+        updateIndex(compressedConversation).catch(console.error);
+      }).catch(() => {
+        // Memory search module might not be available yet
+      });
+    }
   } catch (error) {
     if (error instanceof Error && error.name === 'QuotaExceededError') {
       console.error('[Storage] Quota exceeded, attempting emergency cleanup...');
@@ -192,6 +201,15 @@ export function saveConversation(conversation: Conversation): void {
 export function deleteConversation(id: string): void {
   const conversations = getConversations().filter((c) => c.id !== id);
   localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations));
+
+  // Trigger async memory search index removal
+  if (typeof window !== 'undefined') {
+    import('@/lib/memory-search').then(({ removeFromIndex }) => {
+      removeFromIndex(id).catch(console.error);
+    }).catch(() => {
+      // Memory search module might not be available yet
+    });
+  }
 }
 
 export function getSettings(): ChatSettings {

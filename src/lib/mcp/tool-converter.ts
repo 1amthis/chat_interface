@@ -35,6 +35,10 @@ export function parseToolName(fullName: string): {
     return { source: 'google_drive', name: fullName };
   }
 
+  if (fullName === 'memory_search') {
+    return { source: 'memory_search', name: fullName };
+  }
+
   // Default: unknown source
   return { source: 'other', name: fullName };
 }

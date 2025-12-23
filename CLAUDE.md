@@ -10,6 +10,7 @@ A Next.js 16 chat interface supporting multiple AI providers (OpenAI, Anthropic,
 - Artifacts system (code, HTML, React, SVG, Markdown, Mermaid)
 - Web search capabilities (Tavily, Brave, DuckDuckGo, Wikipedia)
 - Google Drive integration
+- Memory search (AI can search previous conversations for context)
 - Project-based conversation organization
 - Theme system (light/dark/system)
 - Token usage tracking with caching support
@@ -40,7 +41,7 @@ Complete MCP server integration system in `src/lib/mcp/`:
 - **MCPManager** (`manager.ts`) - Singleton managing multiple MCP server connections
 - **MCPClient** (`client.ts`) - Individual client for each MCP server connection
 - **Transport Support** - stdio, SSE, streamable-http, and http transports
-- **Unified Tools** - Combines builtin, MCP, web_search, and google_drive tools
+- **Unified Tools** - Combines builtin, MCP, web_search, google_drive, and memory_search tools
 - **API Routes**:
   - `/api/mcp/route.ts` - Get available tools from all connected MCP servers
   - `/api/mcp/call/route.ts` - Execute tool calls on specific MCP servers
@@ -83,6 +84,22 @@ OAuth-based Google Drive access in `src/lib/googledrive.ts`:
   - `/api/drive-search/route.ts` - Execute Drive searches
 - **Supported Files**: Google Docs, Sheets, text files, PDFs
 
+### Memory Search
+
+AI-initiated search across previous conversations in `src/lib/memory-search/`:
+
+- **Search Algorithm**: BM25 (Best Matching 25) for relevance ranking
+- **Storage**: IndexedDB for client-side privacy-preserving search index
+- **Trigger**: AI decides when to search via `memory_search` tool call
+- **Components**:
+  - `types.ts` - TypeScript interfaces for indexed documents and search results
+  - `tokenizer.ts` - Text tokenization with stop word filtering
+  - `indexdb.ts` - IndexedDB operations for index storage
+  - `bm25.ts` - BM25 scoring algorithm implementation
+  - `index.ts` - Main API: `searchMemory()`, `updateIndex()`, `syncIndex()`
+- **Auto-indexing**: Conversations indexed on save, removed on delete
+- **Settings**: Toggle in SettingsModal with manual rebuild option
+
 ### State Management & Storage
 
 Uses browser localStorage for all persistence (`src/lib/storage.ts`):
@@ -124,7 +141,7 @@ This allows proper interleaving of different content types in display order.
 - **ChatMessage.tsx** - Individual message display with edit/regenerate, artifact rendering
 - **ChatInput.tsx** - Message composition with file/image attachment, project file injection
 - **Sidebar.tsx** - Conversation list with project organization and drag-drop
-- **SettingsModal.tsx** - Configuration hub for API keys, MCP servers, web search, Google Drive
+- **SettingsModal.tsx** - Configuration hub for API keys, MCP servers, web search, Google Drive, memory search
 - **ThemeProvider.tsx** / **ThemeToggle.tsx** - Theme management
 - **ThinkingIndicator.tsx** - Animated indicator during streaming
 - **TokenUsageDisplay.tsx** - Detailed token breakdown (input/output/cached/reasoning)

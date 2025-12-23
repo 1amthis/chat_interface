@@ -102,6 +102,7 @@ export function Chat() {
     setSearchStatus,
     performSearch,
     performDriveSearch,
+    performMemorySearch,
     performMCPToolCall,
     generateToolCallId,
   } = useToolExecution({
@@ -338,6 +339,7 @@ export function Chat() {
           searchResults,
           googleDriveEnabled: settings.googleDriveEnabled && !!settings.googleDriveAccessToken,
           driveSearchResults,
+          memorySearchEnabled: settings.memorySearchEnabled,
           toolExecutions,
         }),
         signal: abortControllerRef.current.signal,
@@ -540,13 +542,14 @@ export function Chat() {
                   isError: mcpResult.isError,
                   anthropicThinkingSignature,
                   anthropicThinking,
+                  geminiThoughtSignature: anthropicThinkingSignature, // Same field for Gemini 3
                 };
 
                 // Recursively call with tool execution and accumulated content blocks
                 await streamResponse(conv, undefined, toolCallsAccumulator, undefined, [toolExecution], contentBlocksAccumulator, recursionDepth + 1);
                 return;
-              } else if (toolName === 'web_search' || toolName === 'google_drive_search') {
-                // Web search or Google Drive search - handle as proper tool results
+              } else if (toolName === 'web_search' || toolName === 'google_drive_search' || toolName === 'memory_search') {
+                // Web search, Google Drive search, or Memory search - handle as proper tool results
                 const searchQuery = toolParams.query as string;
 
                 let searchResult: WebSearchResponse | GoogleDriveSearchResponse | null = null;
@@ -591,6 +594,14 @@ export function Chat() {
                     formattedResult = 'Google Drive search failed. Please try again.';
                     isError = true;
                   }
+                } else if (toolName === 'memory_search') {
+                  const memoryResult = await performMemorySearch(searchQuery, conv.id);
+                  if (memoryResult) {
+                    formattedResult = memoryResult.formatted;
+                  } else {
+                    formattedResult = 'Memory search failed. Please try again.';
+                    isError = true;
+                  }
                 }
 
                 // Update tool call with result
@@ -626,6 +637,7 @@ export function Chat() {
                   isError,
                   anthropicThinkingSignature,
                   anthropicThinking,
+                  geminiThoughtSignature: anthropicThinkingSignature, // Same field for Gemini 3
                 };
 
                 // Recursively call with tool execution and accumulated content blocks
@@ -674,6 +686,7 @@ export function Chat() {
                   params: Record<string, unknown>;
                   source?: ToolSource;
                   serverId?: string;
+                  thoughtSignature?: string; // Gemini 3 thought signature
                 };
                 const toolCall = newToolCalls[i];
 
@@ -708,6 +721,14 @@ export function Chat() {
                       });
                     } else {
                       formattedResult = `Google Drive search for "${tc.params.query}" returned no files.`;
+                    }
+                  } else if (tc.name === 'memory_search') {
+                    const result = await performMemorySearch(tc.params.query as string, conv.id);
+                    if (result) {
+                      formattedResult = result.formatted;
+                    } else {
+                      formattedResult = 'Memory search failed.';
+                      isError = true;
                     }
                   } else if (tc.source === 'mcp' || tc.source === 'builtin') {
                     const mcpResult = await performMCPToolCall(tc.name, tc.params, tc.source, tc.serverId);
@@ -750,6 +771,7 @@ export function Chat() {
                   toolParams: tc.params,
                   result: formattedResult,
                   isError,
+                  geminiThoughtSignature: tc.thoughtSignature, // Gemini 3 thought signature
                 });
               }
 
@@ -865,7 +887,7 @@ export function Chat() {
       setCurrentToolCalls([]);
       resetStreamingState();
     }
-  }, [settings, projects, performSearch, performDriveSearch, performMCPToolCall, resetStreamingState, artifactParseStateRef, generateToolCallId, setSearchStatus, streamingArtifactsRef]);
+  }, [settings, projects, performSearch, performDriveSearch, performMemorySearch, performMCPToolCall, resetStreamingState, artifactParseStateRef, generateToolCallId, setSearchStatus, streamingArtifactsRef]);
 
   const handleSend = useCallback(async (content: string, attachments: Attachment[] = []) => {
     const userMessage: Message = {

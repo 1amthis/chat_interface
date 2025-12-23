@@ -20,6 +20,8 @@ export interface ToolCallInfo {
   params: Record<string, unknown>;
   source?: ToolSource;
   serverId?: string;
+  // Gemini 3 thought signature for maintaining reasoning context
+  thoughtSignature?: string;
 }
 
 // Represents a completed tool execution (call + result)
@@ -36,6 +38,8 @@ export interface ToolExecutionResult {
   // before tool_use blocks on follow-up turns.
   anthropicThinkingSignature?: string;
   anthropicThinking?: string;
+  // Gemini 3 thought signature for maintaining reasoning context
+  geminiThoughtSignature?: string;
 }
 
 export interface StreamChunk {

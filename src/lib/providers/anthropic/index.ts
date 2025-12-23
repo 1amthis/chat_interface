@@ -7,7 +7,7 @@ import { ChatMessage, StreamChunk, ToolExecutionResult } from '../types';
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
 import { toAnthropicTools, parseToolName } from '@/lib/mcp/tool-converter';
 import { hasToolBeenExecuted } from '../base';
-import { anthropicWebSearchTool, anthropicGoogleDriveTool } from '../tools/definitions';
+import { anthropicWebSearchTool, anthropicGoogleDriveTool, anthropicMemorySearchTool } from '../tools/definitions';
 import { toAnthropicContent } from './content';
 
 /**
@@ -22,6 +22,7 @@ export async function* streamAnthropic(
   searchResults?: WebSearchResponse,
   googleDriveEnabled?: boolean,
   driveSearchResults?: GoogleDriveSearchResponse,
+  memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
   thinkingEnabled?: boolean,
@@ -148,6 +149,9 @@ export async function* streamAnthropic(
   if (googleDriveEnabled && !driveSearchResults && !hasToolBeenExecuted('google_drive_search', toolExecutions)) {
     tools.push(anthropicGoogleDriveTool);
   }
+  if (memorySearchEnabled && !hasToolBeenExecuted('memory_search', toolExecutions)) {
+    tools.push(anthropicMemorySearchTool);
+  }
   // Add MCP tools
   if (mcpTools && mcpTools.length > 0) {
     tools.push(...toAnthropicTools(mcpTools));
@@ -238,6 +242,16 @@ export async function* streamAnthropic(
             originalToolName: currentToolName,
             toolParams: { query: args.query },
             toolSource: 'google_drive',
+            toolThinkingSignature: currentThinkingSignature || undefined,
+          };
+        } else if (currentToolName === 'memory_search') {
+          yield {
+            type: 'tool_call',
+            toolCallId: currentToolId,
+            toolName: currentToolName,
+            originalToolName: currentToolName,
+            toolParams: { query: args.query },
+            toolSource: 'memory_search',
             toolThinkingSignature: currentThinkingSignature || undefined,
           };
         }

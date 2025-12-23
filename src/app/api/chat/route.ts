@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
       searchResults,
       googleDriveEnabled,
       driveSearchResults,
+      memorySearchEnabled,
       toolExecutions,
     } = body as {
       messages: ChatMessage[];
@@ -26,6 +27,7 @@ export async function POST(request: NextRequest) {
       searchResults?: WebSearchResponse;
       googleDriveEnabled?: boolean;
       driveSearchResults?: GoogleDriveSearchResponse;
+      memorySearchEnabled?: boolean;
       toolExecutions?: ToolExecutionResult[];
     };
 
@@ -61,6 +63,7 @@ export async function POST(request: NextRequest) {
             searchResults,
             googleDriveEnabled,
             driveSearchResults,
+            memorySearchEnabled,
             mcpTools.length > 0 ? mcpTools : undefined,
             toolExecutions
           )) {

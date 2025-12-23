@@ -128,7 +128,7 @@ export interface MCPServerConfig {
   headers?: Record<string, string>;
 }
 
-export type ToolSource = 'builtin' | 'mcp' | 'web_search' | 'google_drive';
+export type ToolSource = 'builtin' | 'mcp' | 'web_search' | 'google_drive' | 'memory_search';
 
 export interface BuiltinToolsConfig {
   filesystem?: {
@@ -168,6 +168,8 @@ export interface ChatSettings {
   mcpEnabled?: boolean;
   mcpServers?: MCPServerConfig[];
   builtinTools?: BuiltinToolsConfig;
+  // Memory search settings
+  memorySearchEnabled?: boolean;
 }
 
 export const DEFAULT_MODELS: Record<Provider, string[]> = {
@@ -351,6 +353,10 @@ export interface GoogleDriveSearchParams {
   query: string;
 }
 
+export interface MemorySearchParams {
+  query: string;
+}
+
 export interface FilesystemReadParams {
   path: string;
 }
@@ -376,6 +382,7 @@ export interface FetchParams {
 export type KnownToolParams =
   | WebSearchParams
   | GoogleDriveSearchParams
+  | MemorySearchParams
   | FilesystemReadParams
   | FilesystemWriteParams
   | ShellExecParams

@@ -7,7 +7,7 @@ import { ChatMessage, StreamChunk, ToolCallInfo, ToolExecutionResult } from '../
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse, ToolSource } from '@/types';
 import { toOpenAITools, parseToolName } from '@/lib/mcp/tool-converter';
 import { hasToolBeenExecuted } from '../base';
-import { openAIWebSearchTool, openAIGoogleDriveTool, toResponsesAPIWebSearchTool, toResponsesAPIGoogleDriveTool } from '../tools/definitions';
+import { openAIWebSearchTool, openAIGoogleDriveTool, openAIMemorySearchTool, toResponsesAPIWebSearchTool, toResponsesAPIGoogleDriveTool, toResponsesAPIMemorySearchTool } from '../tools/definitions';
 import { toOpenAIContent } from './content';
 
 /**
@@ -22,6 +22,7 @@ export async function* streamOpenAI(
   searchResults?: WebSearchResponse,
   googleDriveEnabled?: boolean,
   driveSearchResults?: GoogleDriveSearchResponse,
+  memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[]
 ): AsyncGenerator<StreamChunk> {
@@ -103,6 +104,9 @@ export async function* streamOpenAI(
   }
   if (googleDriveEnabled && !driveSearchResults && !hasToolBeenExecuted('google_drive_search', toolExecutions)) {
     tools.push(openAIGoogleDriveTool);
+  }
+  if (memorySearchEnabled && !hasToolBeenExecuted('memory_search', toolExecutions)) {
+    tools.push(openAIMemorySearchTool);
   }
   // Add MCP tools
   if (mcpTools && mcpTools.length > 0) {
@@ -198,6 +202,14 @@ export async function* streamOpenAI(
               params: { query: args.query },
               source: 'google_drive',
             });
+          } else if (tc.name === 'memory_search') {
+            parsedToolCalls.push({
+              id: tc.id,
+              name: tc.name,
+              originalName: tc.name,
+              params: { query: args.query },
+              source: 'memory_search',
+            });
           }
         } catch {
           // Invalid tool call arguments, skip this one
@@ -248,6 +260,7 @@ export async function* streamOpenAI(
 function toResponsesAPITools(
   webSearchEnabled?: boolean,
   googleDriveEnabled?: boolean,
+  memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[]
 ): Record<string, unknown>[] {
   const tools: Record<string, unknown>[] = [];
@@ -260,6 +273,11 @@ function toResponsesAPITools(
   // Add Google Drive search as a function tool
   if (googleDriveEnabled) {
     tools.push(toResponsesAPIGoogleDriveTool());
+  }
+
+  // Add memory search as a function tool
+  if (memorySearchEnabled) {
+    tools.push(toResponsesAPIMemorySearchTool());
   }
 
   // Add MCP tools
@@ -291,6 +309,7 @@ export async function* streamOpenAIResponses(
   searchResults?: WebSearchResponse,
   googleDriveEnabled?: boolean,
   driveSearchResults?: GoogleDriveSearchResponse,
+  memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[]
 ): AsyncGenerator<StreamChunk> {
@@ -353,6 +372,7 @@ export async function* streamOpenAIResponses(
   const tools = toResponsesAPITools(
     webSearchEnabled && !searchResults && !hasToolBeenExecuted('web_search', toolExecutions),
     googleDriveEnabled && !driveSearchResults && !hasToolBeenExecuted('google_drive_search', toolExecutions),
+    memorySearchEnabled && !hasToolBeenExecuted('memory_search', toolExecutions),
     mcpTools
   );
   if (tools.length > 0) {
@@ -463,6 +483,8 @@ export async function* streamOpenAIResponses(
             toolSource = 'web_search';
           } else if (fc.name === 'google_drive_search') {
             toolSource = 'google_drive';
+          } else if (fc.name === 'memory_search') {
+            toolSource = 'memory_search';
           } else if (fc.name.startsWith('mcp_')) {
             toolSource = 'mcp';
             // Parse MCP tool name: mcp_serverId_toolName

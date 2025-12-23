@@ -1,11 +1,12 @@
 /**
- * Hook for managing tool execution (web search, Google Drive, MCP tools)
+ * Hook for managing tool execution (web search, Google Drive, MCP tools, memory search)
  */
 
 import { useState, useCallback } from 'react';
 import { ChatSettings, WebSearchResponse, GoogleDriveSearchResponse, ToolSource } from '@/types';
 import { saveSettings } from '@/lib/storage';
 import { API_CONFIG } from '@/lib/constants';
+import { searchMemory, formatSearchResultsForAI, MemorySearchResult } from '@/lib/memory-search';
 
 export interface UseToolExecutionOptions {
   settings: ChatSettings;
@@ -17,6 +18,10 @@ export interface UseToolExecutionReturn {
   setSearchStatus: (status: string | null) => void;
   performSearch: (query: string, retries?: number) => Promise<WebSearchResponse | null>;
   performDriveSearch: (query: string, retries?: number) => Promise<GoogleDriveSearchResponse | null>;
+  performMemorySearch: (
+    query: string,
+    excludeConversationId?: string
+  ) => Promise<{ results: MemorySearchResult[]; formatted: string } | null>;
   performMCPToolCall: (
     toolName: string,
     params: Record<string, unknown>,
@@ -190,6 +195,32 @@ export function useToolExecution({
     }
   }, [settings.builtinTools, settings.provider]);
 
+  // Perform memory search across previous conversations
+  const performMemorySearch = useCallback(async (
+    query: string,
+    excludeConversationId?: string
+  ): Promise<{ results: MemorySearchResult[]; formatted: string } | null> => {
+    try {
+      setSearchStatus(`Searching memory: "${query}"`);
+
+      const results = await searchMemory(query, {
+        limit: 5,
+        excludeConversationId,
+      });
+
+      setSearchStatus(null);
+
+      return {
+        results,
+        formatted: formatSearchResultsForAI(results),
+      };
+    } catch (error) {
+      console.error('Memory search error:', error);
+      setSearchStatus(null);
+      return null;
+    }
+  }, []);
+
   // Helper to generate unique IDs for tool calls
   const generateToolCallId = useCallback(() => {
     return `tc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -200,6 +231,7 @@ export function useToolExecution({
     setSearchStatus,
     performSearch,
     performDriveSearch,
+    performMemorySearch,
     performMCPToolCall,
     generateToolCallId,
   };

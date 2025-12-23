@@ -49,6 +49,22 @@ export const GOOGLE_DRIVE_SCHEMA: ToolSchema = {
   },
 };
 
+// Memory search tool schema
+export const MEMORY_SEARCH_SCHEMA: ToolSchema = {
+  name: 'memory_search',
+  description: 'Search through previous conversations to find relevant context, information, or discussions. Use this when the user references something from a past conversation, asks about previous discussions, or when you need to recall information that may have been discussed before.',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'The search query to find relevant past conversations. Be specific and use keywords that are likely to appear in the content.',
+      },
+    },
+    required: ['query'],
+  },
+};
+
 // OpenAI format tools
 export const openAIWebSearchTool: OpenAI.ChatCompletionTool = {
   type: 'function',
@@ -65,6 +81,15 @@ export const openAIGoogleDriveTool: OpenAI.ChatCompletionTool = {
     name: GOOGLE_DRIVE_SCHEMA.name,
     description: GOOGLE_DRIVE_SCHEMA.description,
     parameters: GOOGLE_DRIVE_SCHEMA.parameters,
+  },
+};
+
+export const openAIMemorySearchTool: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: MEMORY_SEARCH_SCHEMA.name,
+    description: MEMORY_SEARCH_SCHEMA.description,
+    parameters: MEMORY_SEARCH_SCHEMA.parameters,
   },
 };
 
@@ -89,6 +114,16 @@ export const anthropicGoogleDriveTool: Anthropic.Tool = {
   },
 };
 
+export const anthropicMemorySearchTool: Anthropic.Tool = {
+  name: MEMORY_SEARCH_SCHEMA.name,
+  description: MEMORY_SEARCH_SCHEMA.description,
+  input_schema: {
+    type: 'object' as const,
+    properties: MEMORY_SEARCH_SCHEMA.parameters.properties,
+    required: MEMORY_SEARCH_SCHEMA.parameters.required,
+  },
+};
+
 // Gemini format tools
 export const geminiWebSearchDeclaration = {
   name: WEB_SEARCH_SCHEMA.name,
@@ -100,6 +135,12 @@ export const geminiGoogleDriveDeclaration = {
   name: GOOGLE_DRIVE_SCHEMA.name,
   description: GOOGLE_DRIVE_SCHEMA.description,
   parameters: GOOGLE_DRIVE_SCHEMA.parameters,
+};
+
+export const geminiMemorySearchDeclaration = {
+  name: MEMORY_SEARCH_SCHEMA.name,
+  description: MEMORY_SEARCH_SCHEMA.description,
+  parameters: MEMORY_SEARCH_SCHEMA.parameters,
 };
 
 // Responses API format tools (for OpenAI reasoning models)
@@ -122,6 +163,18 @@ export function toResponsesAPIGoogleDriveTool() {
     description: GOOGLE_DRIVE_SCHEMA.description,
     parameters: {
       ...GOOGLE_DRIVE_SCHEMA.parameters,
+      additionalProperties: false,
+    },
+  };
+}
+
+export function toResponsesAPIMemorySearchTool() {
+  return {
+    type: 'function',
+    name: MEMORY_SEARCH_SCHEMA.name,
+    description: MEMORY_SEARCH_SCHEMA.description,
+    parameters: {
+      ...MEMORY_SEARCH_SCHEMA.parameters,
       additionalProperties: false,
     },
   };

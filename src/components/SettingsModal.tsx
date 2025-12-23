@@ -385,6 +385,41 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
             )}
           </div>
 
+          {/* Memory Search Section */}
+          <div className="border-t border-[var(--border-color)] pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <label className="block text-sm font-medium">Memory Search</label>
+                <p className="text-xs text-gray-500">
+                  Allow the AI to search previous conversations for context
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={localSettings.memorySearchEnabled || false}
+                onClick={() => setLocalSettings({ ...localSettings, memorySearchEnabled: !localSettings.memorySearchEnabled })}
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                  localSettings.memorySearchEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    localSettings.memorySearchEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            {localSettings.memorySearchEnabled && (
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  The AI can search through your previous conversations to find relevant context when answering questions.
+                  Conversations are indexed locally using IndexedDB.
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* MCP Tools Section */}
           <div className="border-t border-[var(--border-color)] pt-4">
             <MCPSettingsSection

@@ -6,7 +6,7 @@ import { ChatMessage, StreamChunk, ToolCallInfo, ToolExecutionResult } from '../
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
 import { toGeminiTools, parseToolName } from '@/lib/mcp/tool-converter';
 import { hasToolBeenExecuted, generateGeminiToolCallId } from '../base';
-import { geminiWebSearchDeclaration, geminiGoogleDriveDeclaration } from '../tools/definitions';
+import { geminiWebSearchDeclaration, geminiGoogleDriveDeclaration, geminiMemorySearchDeclaration } from '../tools/definitions';
 import { toGeminiParts } from './content';
 
 /**
@@ -21,6 +21,7 @@ export async function* streamGoogle(
   searchResults?: WebSearchResponse,
   googleDriveEnabled?: boolean,
   driveSearchResults?: GoogleDriveSearchResponse,
+  memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[]
 ): AsyncGenerator<StreamChunk> {
@@ -44,15 +45,26 @@ export async function* streamGoogle(
 
   // If there are tool executions, add them using Gemini's function call/response format
   // Use originalToolName (prefixed) when available to match registered tool names
+  // Only Gemini 3 models require thoughtSignature (at part level, not inside functionCall)
+  const isGemini3 = model.includes('gemini-3');
+
   if (toolExecutions && toolExecutions.length > 0) {
     contents.push({
       role: 'model',
-      parts: toolExecutions.map((te) => ({
-        functionCall: {
-          name: te.originalToolName || te.toolName,
-          args: te.toolParams,
-        },
-      })),
+      parts: toolExecutions.map((te) => {
+        const part: Record<string, unknown> = {
+          functionCall: {
+            name: te.originalToolName || te.toolName,
+            args: te.toolParams,
+          },
+        };
+        // Gemini 3 requires thoughtSignature at part level (sibling to functionCall)
+        // Use captured signature or dummy value to bypass validation
+        if (isGemini3) {
+          part.thoughtSignature = te.geminiThoughtSignature || 'skip_thought_signature_validator';
+        }
+        return part;
+      }),
     });
 
     contents.push({
@@ -91,6 +103,9 @@ export async function* streamGoogle(
   }
   if (googleDriveEnabled && !driveSearchResults && !hasToolBeenExecuted('google_drive_search', toolExecutions)) {
     functionDeclarations.push(geminiGoogleDriveDeclaration);
+  }
+  if (memorySearchEnabled && !hasToolBeenExecuted('memory_search', toolExecutions)) {
+    functionDeclarations.push(geminiMemorySearchDeclaration);
   }
   if (mcpTools && mcpTools.length > 0) {
     functionDeclarations.push(...toGeminiTools(mcpTools).functionDeclarations);
@@ -164,6 +179,9 @@ export async function* streamGoogle(
             }
           }
 
+          // Capture thoughtSignature for Gemini 3 models (at part level, camelCase)
+          const thoughtSignature = part.thoughtSignature as string | undefined;
+
           const parsed = parseToolName(rawName);
           const id = generateGeminiToolCallId();
           const params = (args as Record<string, unknown>) || {};
@@ -176,6 +194,7 @@ export async function* streamGoogle(
               params,
               source: 'mcp',
               serverId: parsed.serverId,
+              thoughtSignature,
             });
           } else if (parsed.source === 'builtin') {
             toolCallsInCandidate.push({
@@ -184,6 +203,7 @@ export async function* streamGoogle(
               originalName: rawName, // Keep prefixed name for API
               params,
               source: 'builtin',
+              thoughtSignature,
             });
           } else if (rawName === 'web_search') {
             toolCallsInCandidate.push({
@@ -192,6 +212,7 @@ export async function* streamGoogle(
               originalName: rawName,
               params,
               source: 'web_search',
+              thoughtSignature,
             });
           } else if (rawName === 'google_drive_search') {
             toolCallsInCandidate.push({
@@ -200,6 +221,16 @@ export async function* streamGoogle(
               originalName: rawName,
               params,
               source: 'google_drive',
+              thoughtSignature,
+            });
+          } else if (rawName === 'memory_search') {
+            toolCallsInCandidate.push({
+              id,
+              name: rawName,
+              originalName: rawName,
+              params,
+              source: 'memory_search',
+              thoughtSignature,
             });
           } else {
             toolCallsInCandidate.push({
@@ -207,6 +238,7 @@ export async function* streamGoogle(
               name: rawName,
               originalName: rawName,
               params,
+              thoughtSignature,
             });
           }
         }
@@ -221,6 +253,7 @@ export async function* streamGoogle(
           toolParams: tc.params,
           toolSource: tc.source,
           toolServerId: tc.serverId,
+          toolThinkingSignature: tc.thoughtSignature, // Gemini 3 thought signature
         });
       } else if (toolCallsInCandidate.length > 1) {
         emitted.push({
