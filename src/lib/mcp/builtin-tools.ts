@@ -1,32 +1,159 @@
-import { promises as fs } from 'fs';
-import { exec } from 'child_process';
+import { promises as fs, realpathSync } from 'fs';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
+import * as dns from 'dns';
+import * as net from 'net';
 import type { UnifiedTool, BuiltinToolsConfig } from '@/types';
 import type { MCPCallToolResult } from './types';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Security validation helpers
+
+/** Shell metacharacters that indicate command injection attempts */
+const SHELL_METACHARACTERS = /[;|&$`(){}<>\n\\]/;
 
 function isPathAllowed(targetPath: string, allowedPaths: string[]): boolean {
   if (allowedPaths.length === 0) {
     return true; // No restrictions
   }
 
-  const normalizedTarget = path.resolve(targetPath);
+  try {
+    // Use realpathSync to resolve symlinks, preventing TOCTOU attacks
+    const normalizedTarget = realpathSync(targetPath);
 
-  for (const allowed of allowedPaths) {
-    const normalizedAllowed = path.resolve(allowed);
-    if (
-      normalizedTarget === normalizedAllowed ||
-      normalizedTarget.startsWith(normalizedAllowed + path.sep)
-    ) {
-      return true;
+    for (const allowed of allowedPaths) {
+      try {
+        const normalizedAllowed = realpathSync(allowed);
+        if (
+          normalizedTarget === normalizedAllowed ||
+          normalizedTarget.startsWith(normalizedAllowed + path.sep)
+        ) {
+          return true;
+        }
+      } catch {
+        // If allowed path doesn't exist, skip it
+        continue;
+      }
+    }
+  } catch {
+    // For new files that don't exist yet, resolve the parent directory
+    const parentDir = path.dirname(targetPath);
+    const baseName = path.basename(targetPath);
+    try {
+      const resolvedParent = realpathSync(parentDir);
+      const resolvedTarget = path.join(resolvedParent, baseName);
+
+      for (const allowed of allowedPaths) {
+        try {
+          const normalizedAllowed = realpathSync(allowed);
+          if (
+            resolvedTarget === normalizedAllowed ||
+            resolvedTarget.startsWith(normalizedAllowed + path.sep)
+          ) {
+            return true;
+          }
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      // Parent directory doesn't exist either - reject
+      return false;
     }
   }
 
   return false;
+}
+
+/** Check if a string looks like an IP address (v4 or v6) */
+function isIPAddress(hostname: string): boolean {
+  return net.isIP(hostname) !== 0;
+}
+
+/** Check if an IP address is in a private/reserved range */
+function isPrivateIP(ip: string): boolean {
+  // IPv4 private/reserved ranges
+  if (net.isIPv4(ip)) {
+    const parts = ip.split('.').map(Number);
+    // 127.0.0.0/8 (loopback)
+    if (parts[0] === 127) return true;
+    // 0.0.0.0
+    if (parts[0] === 0) return true;
+    // 10.0.0.0/8
+    if (parts[0] === 10) return true;
+    // 172.16.0.0/12
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    // 192.168.0.0/16
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    // 169.254.0.0/16 (link-local)
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    return false;
+  }
+
+  // IPv6 private/reserved ranges
+  if (net.isIPv6(ip)) {
+    const normalized = ip.toLowerCase();
+    // ::1 (loopback)
+    if (normalized === '::1' || normalized === '0000:0000:0000:0000:0000:0000:0000:0001') return true;
+    // :: (unspecified)
+    if (normalized === '::') return true;
+    // fc00::/7 (unique local)
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+    // fe80::/10 (link-local)
+    if (normalized.startsWith('fe80')) return true;
+    // IPv4-mapped IPv6 (::ffff:x.x.x.x)
+    const v4mapped = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)/);
+    if (v4mapped) return isPrivateIP(v4mapped[1]);
+    return false;
+  }
+
+  return false;
+}
+
+/**
+ * Validate a URL for SSRF protection:
+ * - Only http: and https: protocols allowed
+ * - No private/reserved IP addresses
+ * - DNS resolution check to prevent DNS rebinding
+ */
+async function validateUrl(url: string): Promise<{ valid: boolean; error?: string }> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { valid: false, error: 'Invalid URL' };
+  }
+
+  // Protocol whitelist
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { valid: false, error: `Protocol not allowed: ${parsed.protocol}` };
+  }
+
+  const hostname = parsed.hostname;
+
+  // Block direct IP addresses unless they're in allowed domains
+  if (isIPAddress(hostname)) {
+    if (isPrivateIP(hostname)) {
+      return { valid: false, error: `Private IP address blocked: ${hostname}` };
+    }
+    // Allow public IPs (they'll still need to pass domain allowlist if configured)
+    return { valid: true };
+  }
+
+  // Resolve hostname and check for private IPs (DNS rebinding protection)
+  try {
+    const dnsLookup = promisify(dns.lookup);
+    const result = await dnsLookup(hostname);
+    if (isPrivateIP(result.address)) {
+      return { valid: false, error: `Hostname ${hostname} resolves to private IP: ${result.address}` };
+    }
+  } catch {
+    return { valid: false, error: `Could not resolve hostname: ${hostname}` };
+  }
+
+  return { valid: true };
 }
 
 function isDomainAllowed(url: string, allowedDomains: string[]): boolean {
@@ -37,6 +164,11 @@ function isDomainAllowed(url: string, allowedDomains: string[]): boolean {
   try {
     const parsedUrl = new URL(url);
     const hostname = parsedUrl.hostname.toLowerCase();
+
+    // Block IP-based URLs unless the exact IP is in the allowlist
+    if (isIPAddress(hostname)) {
+      return allowedDomains.some(d => d.toLowerCase() === hostname);
+    }
 
     for (const domain of allowedDomains) {
       const normalizedDomain = domain.toLowerCase();
@@ -54,20 +186,73 @@ function isDomainAllowed(url: string, allowedDomains: string[]): boolean {
   }
 }
 
-function isCommandAllowed(command: string, allowedCommands: string[]): boolean {
+/**
+ * Parse and validate a shell command string.
+ * Tokenizes respecting quoted strings, validates base command against allowlist,
+ * and rejects arguments containing shell metacharacters.
+ * Returns parsed command + args, or null if rejected.
+ */
+function parseAndValidateCommand(
+  command: string,
+  allowedCommands: string[]
+): { command: string; args: string[] } | null {
   if (allowedCommands.length === 0) {
-    return false; // Shell disabled by default if no allowlist
+    return null; // Shell disabled by default if no allowlist
   }
 
-  const baseCommand = command.split(/\s+/)[0];
+  // Tokenize the command string respecting quoted strings
+  const tokens: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
 
-  for (const allowed of allowedCommands) {
-    if (baseCommand === allowed || command.startsWith(allowed + ' ')) {
-      return true;
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+
+    if (char === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (char === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (char === ' ' && !inSingle && !inDouble) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (current) tokens.push(current);
+
+  // Unclosed quotes
+  if (inSingle || inDouble) {
+    return null;
+  }
+
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  const baseCommand = tokens[0];
+  const args = tokens.slice(1);
+
+  // Validate base command against allowlist
+  if (!allowedCommands.includes(baseCommand)) {
+    return null;
+  }
+
+  // Reject arguments containing shell metacharacters
+  for (const arg of args) {
+    if (SHELL_METACHARACTERS.test(arg)) {
+      return null;
     }
   }
 
-  return false;
+  return { command: baseCommand, args };
 }
 
 // Built-in tool implementations
@@ -180,6 +365,20 @@ export async function fetchUrl(
     };
   }
 
+  // SSRF protection: validate URL before fetching
+  const urlValidation = await validateUrl(url);
+  if (!urlValidation.valid) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `URL blocked: ${urlValidation.error}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
   if (!isDomainAllowed(url, fetchConfig.allowedDomains || [])) {
     return {
       content: [
@@ -205,14 +404,29 @@ export async function fetchUrl(
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
       if (location) {
-        const originalHost = new URL(url).host;
-        const redirectHost = new URL(location, url).host;
-        if (originalHost !== redirectHost) {
+        const redirectUrl = new URL(location, url).href;
+
+        // Validate redirect URL for SSRF
+        const redirectValidation = await validateUrl(redirectUrl);
+        if (!redirectValidation.valid) {
           return {
             content: [
               {
                 type: 'text',
-                text: `Redirect to different host blocked: ${location}`,
+                text: `Redirect blocked: ${redirectValidation.error}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Also check redirect against domain allowlist
+        if (!isDomainAllowed(redirectUrl, fetchConfig.allowedDomains || [])) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Redirect to different domain blocked: ${location}`,
               },
             ],
             isError: true,
@@ -263,12 +477,13 @@ export async function shellExecute(
     };
   }
 
-  if (!isCommandAllowed(command, shellConfig.allowedCommands || [])) {
+  const parsed = parseAndValidateCommand(command, shellConfig.allowedCommands || []);
+  if (!parsed) {
     return {
       content: [
         {
           type: 'text',
-          text: `Command not allowed: ${command}. Allowed commands: ${shellConfig.allowedCommands?.join(', ') || 'none'}`,
+          text: `Command not allowed: ${command}. Allowed commands: ${shellConfig.allowedCommands?.join(', ') || 'none'}. Arguments must not contain shell metacharacters.`,
         },
       ],
       isError: true,
@@ -276,7 +491,7 @@ export async function shellExecute(
   }
 
   try {
-    const { stdout, stderr } = await execAsync(command, {
+    const { stdout, stderr } = await execFileAsync(parsed.command, parsed.args, {
       timeout: 30000, // 30 second timeout
       maxBuffer: 1024 * 1024, // 1MB max output
     });
@@ -389,17 +604,45 @@ export async function executeBuiltinTool(
   config: BuiltinToolsConfig
 ): Promise<MCPCallToolResult> {
   switch (toolName) {
-    case 'filesystem_read':
-      return filesystemRead(params.path as string, config);
+    case 'filesystem_read': {
+      if (typeof params.path !== 'string') {
+        return {
+          content: [{ type: 'text', text: 'Invalid parameter: "path" must be a string' }],
+          isError: true,
+        };
+      }
+      return filesystemRead(params.path, config);
+    }
 
-    case 'filesystem_list':
-      return filesystemList(params.path as string, config);
+    case 'filesystem_list': {
+      if (typeof params.path !== 'string') {
+        return {
+          content: [{ type: 'text', text: 'Invalid parameter: "path" must be a string' }],
+          isError: true,
+        };
+      }
+      return filesystemList(params.path, config);
+    }
 
-    case 'fetch_url':
-      return fetchUrl(params.url as string, config);
+    case 'fetch_url': {
+      if (typeof params.url !== 'string') {
+        return {
+          content: [{ type: 'text', text: 'Invalid parameter: "url" must be a string' }],
+          isError: true,
+        };
+      }
+      return fetchUrl(params.url, config);
+    }
 
-    case 'shell_execute':
-      return shellExecute(params.command as string, config);
+    case 'shell_execute': {
+      if (typeof params.command !== 'string') {
+        return {
+          content: [{ type: 'text', text: 'Invalid parameter: "command" must be a string' }],
+          isError: true,
+        };
+      }
+      return shellExecute(params.command, config);
+    }
 
     default:
       return {

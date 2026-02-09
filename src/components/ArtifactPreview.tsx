@@ -1,5 +1,6 @@
 'use client';
 
+import { RefObject } from 'react';
 import { Artifact } from '@/types';
 import { CodePreview } from './artifact-previews/CodePreview';
 import { MarkdownPreview } from './artifact-previews/MarkdownPreview';
@@ -11,9 +12,10 @@ import { ReactPreview } from './artifact-previews/ReactPreview';
 interface ArtifactPreviewProps {
   artifact: Artifact;
   versionIndex?: number; // If provided, show a specific version
+  iframeRef?: RefObject<HTMLIFrameElement | null>; // For HTML artifacts only
 }
 
-export function ArtifactPreview({ artifact, versionIndex }: ArtifactPreviewProps) {
+export function ArtifactPreview({ artifact, versionIndex, iframeRef }: ArtifactPreviewProps) {
   // Use version content if specified, otherwise current content
   const content =
     versionIndex !== undefined && artifact.versions[versionIndex]
@@ -28,7 +30,7 @@ export function ArtifactPreview({ artifact, versionIndex }: ArtifactPreviewProps
       return <MarkdownPreview content={content} />;
 
     case 'html':
-      return <HTMLPreview content={content} />;
+      return <HTMLPreview content={content} ref={iframeRef} />;
 
     case 'svg':
       return <SVGPreview content={content} />;

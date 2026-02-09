@@ -478,3 +478,33 @@ export interface ToolSchema {
     required?: string[];
   };
 }
+
+// PDF Export types
+export interface PdfExportOptions {
+  margin: number | [number, number, number, number];
+  filename: string;
+  image: { type: 'jpeg' | 'png'; quality: number };
+  html2canvas: {
+    scale: number;
+    useCORS: boolean;
+    logging?: boolean;
+    allowTaint?: boolean;
+    backgroundColor?: string;
+    removeContainer?: boolean;
+    imageTimeout?: number;
+    foreignObjectRendering?: boolean;
+    windowWidth?: number;
+    windowHeight?: number;
+  };
+  jsPDF: {
+    unit: 'pt' | 'mm' | 'in';
+    format: 'a4' | 'letter' | 'a3' | 'a5';
+    orientation: 'portrait' | 'landscape'
+  };
+  pagebreak?: {
+    mode?: string | string[];
+    before?: string | string[];
+    after?: string | string[];
+    avoid?: string | string[];
+  };
+}

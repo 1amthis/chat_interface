@@ -6,6 +6,7 @@ class MCPManager {
   private static instance: MCPManager | null = null;
   private clients: Map<string, MCPClient> = new Map();
   private configHash: string = '';
+  private updateLock: Promise<void> = Promise.resolve();
 
   private constructor() {}
 
@@ -20,6 +21,7 @@ class MCPManager {
     return JSON.stringify(
       configs.map((c) => ({
         id: c.id,
+        name: c.name,
         enabled: c.enabled,
         transport: c.transport,
         command: c.command,
@@ -32,10 +34,36 @@ class MCPManager {
   }
 
   async updateConfig(configs: MCPServerConfig[]): Promise<void> {
+    // Chain update calls through a mutex to prevent race conditions
+    const previousLock = this.updateLock;
+    let releaseLock: () => void;
+    this.updateLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+
+    try {
+      await previousLock;
+      await this._updateConfigImpl(configs);
+    } finally {
+      releaseLock!();
+    }
+  }
+
+  private async _updateConfigImpl(configs: MCPServerConfig[]): Promise<void> {
     const newHash = this.hashConfig(configs);
 
-    // If config hasn't changed, skip
+    // If config hasn't changed, check for disconnected servers to retry
     if (newHash === this.configHash) {
+      // Retry connection for any disconnected servers
+      for (const [id, client] of this.clients.entries()) {
+        if (!client.isConnected) {
+          try {
+            await client.connect();
+          } catch (error) {
+            console.error(`Failed to reconnect MCP server ${client.name}:`, error);
+          }
+        }
+      }
       return;
     }
 

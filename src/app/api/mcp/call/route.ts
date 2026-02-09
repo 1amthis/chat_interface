@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { mcpManager } from '@/lib/mcp/manager';
 import { executeBuiltinTool } from '@/lib/mcp/builtin-tools';
 import { parseToolName, formatMCPResultForProvider } from '@/lib/mcp/tool-converter';
+import { validateCSRF, builtinToolsConfigSchema } from '@/lib/mcp/server-config';
 import type { BuiltinToolsConfig, Provider } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +26,14 @@ interface CallToolRequest {
 
 // POST /api/mcp/call - Execute an MCP or built-in tool
 export async function POST(request: NextRequest) {
+  // CSRF protection: only allow requests from localhost/app host
+  if (!validateCSRF(request)) {
+    return NextResponse.json(
+      { error: 'CSRF validation failed: request must originate from the application' },
+      { status: 403 }
+    );
+  }
+
   try {
     const body: CallToolRequest = await request.json();
     let { source, serverId, toolName, params } = body;
@@ -72,7 +81,16 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      result = await executeBuiltinTool(toolName, params || {}, builtinToolsConfig);
+      // Validate builtinToolsConfig with zod to prevent malicious configs
+      const configValidation = builtinToolsConfigSchema.safeParse(builtinToolsConfig);
+      if (!configValidation.success) {
+        return NextResponse.json(
+          { error: 'Invalid built-in tools config', details: configValidation.error.format() },
+          { status: 400 }
+        );
+      }
+
+      result = await executeBuiltinTool(toolName, params || {}, configValidation.data);
     } else {
       return NextResponse.json(
         { error: 'Unknown tool source. Specify source or use prefixed tool name.' },

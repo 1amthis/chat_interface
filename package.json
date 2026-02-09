@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.71.0",
     "@modelcontextprotocol/sdk": "^1.24.3",
     "dompurify": "^3.3.1",
+    "html2pdf.js": "^0.14.0",
     "mermaid": "^11.12.2",
     "next": "16.0.7",
     "openai": "^6.9.1",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/dompurify": "^3.0.5",
+    "@types/html2pdf.js": "^0.10.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

@@ -211,8 +211,12 @@ export async function* streamOpenAI(
               source: 'memory_search',
             });
           }
-        } catch {
-          // Invalid tool call arguments, skip this one
+        } catch (e) {
+          // Invalid tool call arguments - warn instead of silently dropping
+          console.warn(
+            `[OpenAI] Failed to parse tool call arguments for "${tc.name}":`,
+            tc.args.slice(0, 200)
+          );
         }
       }
 
@@ -283,8 +287,10 @@ function toResponsesAPITools(
   // Add MCP tools
   if (mcpTools && mcpTools.length > 0) {
     for (const tool of mcpTools) {
-      // Create a namespaced tool name for MCP tools
-      const toolName = tool.serverId ? `mcp_${tool.serverId}_${tool.name}` : `mcp_${tool.name}`;
+      // Create a namespaced tool name for MCP tools using __ delimiter
+      const toolName = tool.serverId
+        ? `mcp__${tool.serverId}__${tool.name}`
+        : `mcp__${tool.name}`;
       tools.push({
         type: 'function',
         name: toolName,
@@ -317,43 +323,80 @@ export async function* streamOpenAIResponses(
 
   const client = new OpenAI({ apiKey });
 
-  // Build input from messages - Responses API uses a different format
-  // Convert chat messages to a conversation format
-  const inputParts: string[] = [];
+  // Build structured input array for Responses API
+  const inputMessages: Record<string, unknown>[] = [];
 
   for (const msg of messages) {
-    const role = msg.role === 'user' ? 'User' : 'Assistant';
-    let content = msg.content;
+    const role = msg.role === 'user' ? 'user' : 'assistant';
 
-    // Handle file attachments
+    // Build content parts for this message
+    const contentParts: Record<string, unknown>[] = [];
+
+    // Add text content
+    if (msg.content) {
+      contentParts.push({ type: 'input_text', text: msg.content });
+    }
+
+    // Handle file/image attachments
     const attachments = msg.attachments || [];
     const projectFiles = msg.projectFiles || [];
     const allAttachments = [...projectFiles, ...attachments];
-    const fileAttachments = allAttachments.filter((a) => a.type === 'file');
 
-    for (const file of fileAttachments) {
-      try {
-        const textContent = atob(file.data);
-        content += `\n\n[File: ${file.name}]\n${textContent}`;
-      } catch {
-        content += `\n\n[File: ${file.name}] (Unable to decode content)`;
+    for (const attachment of allAttachments) {
+      if (attachment.type === 'image') {
+        // Send images as input_image parts for vision support
+        contentParts.push({
+          type: 'input_image',
+          image_url: `data:${attachment.mimeType};base64,${attachment.data}`,
+        });
+      } else if (attachment.type === 'file') {
+        try {
+          const textContent = atob(attachment.data);
+          contentParts.push({
+            type: 'input_text',
+            text: `[File: ${attachment.name}]\n${textContent}`,
+          });
+        } catch {
+          contentParts.push({
+            type: 'input_text',
+            text: `[File: ${attachment.name}] (Unable to decode content)`,
+          });
+        }
       }
     }
 
-    inputParts.push(`${role}: ${content}`);
+    if (contentParts.length > 0) {
+      inputMessages.push({
+        role,
+        content: contentParts,
+      });
+    }
   }
 
-  // Add tool execution results to the input if present
+  // Add tool execution results as top-level input items (Responses API format)
   if (toolExecutions && toolExecutions.length > 0) {
     for (const te of toolExecutions) {
-      inputParts.push(`[Tool Result for ${te.toolName}]: ${te.result}`);
+      // Add the function call item
+      inputMessages.push({
+        type: 'function_call',
+        name: te.originalToolName || te.toolName,
+        call_id: te.toolCallId,
+        arguments: JSON.stringify(te.toolParams),
+      });
+
+      // Add the function call output item
+      inputMessages.push({
+        type: 'function_call_output',
+        call_id: te.toolCallId,
+        output: te.result,
+      });
     }
   }
 
   // Build the request options
   const requestOptions: Record<string, unknown> = {
     model,
-    input: inputParts.join('\n\n'),
+    input: inputMessages,
     stream: true,
     reasoning: {
       effort: 'medium',
@@ -485,9 +528,18 @@ export async function* streamOpenAIResponses(
             toolSource = 'google_drive';
           } else if (fc.name === 'memory_search') {
             toolSource = 'memory_search';
-          } else if (fc.name.startsWith('mcp_')) {
+          } else if (fc.name.startsWith('mcp__')) {
+            // New __ delimiter format: mcp__serverId__toolName
             toolSource = 'mcp';
-            // Parse MCP tool name: mcp_serverId_toolName
+            const rest = fc.name.slice(5);
+            const sepIdx = rest.indexOf('__');
+            if (sepIdx !== -1) {
+              toolServerId = rest.slice(0, sepIdx);
+              toolName = rest.slice(sepIdx + 2);
+            }
+          } else if (fc.name.startsWith('mcp_')) {
+            // Legacy _ delimiter format: mcp_serverId_toolName
+            toolSource = 'mcp';
             const parts = fc.name.split('_');
             if (parts.length >= 3) {
               toolServerId = parts[1];
@@ -502,8 +554,12 @@ export async function* streamOpenAIResponses(
             toolSource,
             toolServerId,
           };
-        } catch {
-          // Invalid JSON arguments, skip
+        } catch (e) {
+          // Invalid JSON arguments - warn instead of silently dropping
+          console.warn(
+            `[OpenAI Responses] Failed to parse function call arguments for "${fc.name}":`,
+            fc.arguments.slice(0, 200)
+          );
         }
       }
     }

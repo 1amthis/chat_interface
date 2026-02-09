@@ -255,8 +255,12 @@ export async function* streamAnthropic(
             toolThinkingSignature: currentThinkingSignature || undefined,
           };
         }
-      } catch {
-        // Invalid tool call arguments
+      } catch (e) {
+        // Invalid tool call arguments - warn instead of silently dropping
+        console.warn(
+          `[Anthropic] Failed to parse tool call arguments for "${currentToolName}":`,
+          currentToolInput.slice(0, 200)
+        );
       }
       currentToolName = '';
       currentToolId = '';

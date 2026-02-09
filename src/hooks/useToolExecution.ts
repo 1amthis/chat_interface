@@ -150,49 +150,79 @@ export function useToolExecution({
     return null;
   }, [settings, setSettings]);
 
-  // Perform MCP or builtin tool call
+  // Perform MCP or builtin tool call with retry logic and timeout
   const performMCPToolCall = useCallback(async (
     toolName: string,
     params: Record<string, unknown>,
     source: ToolSource,
     serverId?: string
   ): Promise<{ result: string; isError: boolean }> => {
-    try {
-      setSearchStatus(`Running tool: ${toolName}`);
+    const maxRetries = API_CONFIG.SEARCH_RETRIES;
+    let lastError: Error | null = null;
 
-      const response = await fetch('/api/mcp/call', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source,
-          serverId,
-          toolName,
-          params,
-          builtinToolsConfig: settings.builtinTools,
-          provider: settings.provider,
-        }),
-      });
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        setSearchStatus(`Running tool: ${toolName}${attempt > 0 ? ` (retry ${attempt})` : ''}`);
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Tool call failed: ${response.status}`);
+        const response = await fetch('/api/mcp/call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source,
+            serverId,
+            toolName,
+            params,
+            builtinToolsConfig: settings.builtinTools,
+            provider: settings.provider,
+          }),
+          signal: AbortSignal.timeout(60000), // 60 second timeout
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const error = new Error(errorData.error || `Tool call failed: ${response.status}`);
+          // Don't retry 4xx errors
+          if (response.status >= 400 && response.status < 500) {
+            setSearchStatus(null);
+            return {
+              result: error.message,
+              isError: true,
+            };
+          }
+          throw error;
+        }
+
+        const data = await response.json();
+        setSearchStatus(null);
+
+        return {
+          result: data.formattedResult || JSON.stringify(data.result, null, 2),
+          isError: data.result?.isError || false,
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error('Tool call failed');
+
+        // Don't retry abort/timeout errors
+        if (lastError.name === 'AbortError' || lastError.name === 'TimeoutError') {
+          break;
+        }
+
+        console.error(`MCP tool call attempt ${attempt + 1} failed:`, error);
+
+        if (attempt < maxRetries) {
+          await new Promise(resolve =>
+            setTimeout(resolve, API_CONFIG.RETRY_DELAY_BASE_MS * Math.pow(2, attempt))
+          );
+        }
       }
-
-      const data = await response.json();
-      setSearchStatus(null);
-
-      return {
-        result: data.formattedResult || JSON.stringify(data.result, null, 2),
-        isError: data.result?.isError || false,
-      };
-    } catch (error) {
-      console.error('MCP tool call error:', error);
-      setSearchStatus(null);
-      return {
-        result: error instanceof Error ? error.message : 'Tool call failed',
-        isError: true,
-      };
     }
+
+    console.error('MCP tool call error after all retries:', lastError);
+    setSearchStatus(null);
+    return {
+      result: lastError?.message || 'Tool call failed',
+      isError: true,
+    };
   }, [settings.builtinTools, settings.provider]);
 
   // Perform memory search across previous conversations
@@ -223,7 +253,7 @@ export function useToolExecution({
 
   // Helper to generate unique IDs for tool calls
   const generateToolCallId = useCallback(() => {
-    return `tc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `tc_${crypto.randomUUID()}`;
   }, []);
 
   return {

@@ -61,6 +61,11 @@ export async function* streamGoogle(
         // Gemini 3 requires thoughtSignature at part level (sibling to functionCall)
         // Use captured signature or dummy value to bypass validation
         if (isGemini3) {
+          if (!te.geminiThoughtSignature) {
+            console.warn(
+              `[Gemini] No thought signature available for tool "${te.toolName}", using dummy signature`
+            );
+          }
           part.thoughtSignature = te.geminiThoughtSignature || 'skip_thought_signature_validator';
         }
         return part;

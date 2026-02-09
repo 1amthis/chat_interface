@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Artifact, ArtifactType } from '@/types';
 import { ArtifactPreview } from './ArtifactPreview';
+import { useHtmlToPdf } from '@/hooks/useHtmlToPdf';
 
 interface ArtifactPanelProps {
   artifact: Artifact | undefined;
@@ -77,6 +78,20 @@ export function ArtifactPanel({
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const resizeRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // PDF export hook for HTML artifacts
+  const { downloadPdf, isGenerating: isGeneratingPdf, error: pdfError } = useHtmlToPdf(
+    iframeRef,
+    artifact?.title.replace(/[^a-z0-9]/gi, '_') || 'artifact'
+  );
+
+  // Show error message if PDF generation fails
+  useEffect(() => {
+    if (pdfError) {
+      alert(`Failed to generate PDF: ${pdfError}`);
+    }
+  }, [pdfError]);
 
   // Handle resize dragging
   useEffect(() => {
@@ -131,6 +146,17 @@ export function ArtifactPanel({
     URL.revokeObjectURL(url);
     onDownload(artifact);
   }, [artifact, onDownload]);
+
+  const handleDownloadPdf = useCallback(async () => {
+    if (!artifact || artifact.type !== 'html') return;
+    try {
+      await downloadPdf();
+      onDownload(artifact);
+    } catch (error) {
+      console.error('Failed to download PDF:', error);
+      // Error is already handled by the hook
+    }
+  }, [artifact, downloadPdf, onDownload]);
 
   const handleStartEdit = useCallback(() => {
     if (!artifact) return;
@@ -276,7 +302,11 @@ export function ArtifactPanel({
             versionIndex={selectedVersionIndex}
           />
         ) : (
-          <ArtifactPreview artifact={artifact} versionIndex={selectedVersionIndex} />
+          <ArtifactPreview
+            artifact={artifact}
+            versionIndex={selectedVersionIndex}
+            iframeRef={artifact.type === 'html' ? iframeRef : undefined}
+          />
         )}
       </div>
 
@@ -315,6 +345,26 @@ export function ArtifactPanel({
           >
             Download
           </button>
+          {artifact.type === 'html' && (
+            <button
+              onClick={handleDownloadPdf}
+              disabled={isGeneratingPdf}
+              className="px-3 py-1.5 text-xs bg-green-500 text-white rounded hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              title="Download as PDF"
+            >
+              {isGeneratingPdf ? (
+                <>
+                  <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Generating...
+                </>
+              ) : (
+                'PDF Download'
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

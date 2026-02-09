@@ -272,6 +272,47 @@ export function Chat() {
     // Prevent infinite tool call loops
     if (recursionDepth >= MAX_TOOL_RECURSION_DEPTH) {
       console.warn(`Tool call limit reached (${MAX_TOOL_RECURSION_DEPTH} calls). Stopping to prevent infinite loop.`);
+
+      // Save accumulated content and tool calls instead of silently returning
+      const limitBlocks: ContentBlock[] = accumulatedContentBlocks ? [...accumulatedContentBlocks] : [];
+      limitBlocks.push({
+        type: 'text',
+        text: `\n\n[Tool call limit reached (${MAX_TOOL_RECURSION_DEPTH} calls). Stopping to prevent infinite loop.]`,
+      });
+
+      const fullContent = limitBlocks
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map(b => b.text)
+        .join('');
+
+      const limitToolCalls = existingToolCalls ? [...existingToolCalls] : [];
+
+      const assistantMessage: Message = {
+        id: generateId(),
+        role: 'assistant',
+        content: fullContent,
+        contentBlocks: limitBlocks.length > 0 ? limitBlocks : undefined,
+        toolCalls: limitToolCalls.length > 0 ? limitToolCalls : undefined,
+        timestamp: Date.now(),
+      };
+
+      const existingArtifacts = conv.artifacts || [];
+      const allArtifacts = [...existingArtifacts, ...streamingArtifactsRef.current];
+
+      const updatedConv: Conversation = {
+        ...conv,
+        messages: [...conv.messages, assistantMessage],
+        artifacts: allArtifacts.length > 0 ? allArtifacts : undefined,
+        updatedAt: Date.now(),
+      };
+
+      setCurrentConversation(updatedConv);
+      saveConversation(updatedConv);
+      setConversations(getConversations());
+      setStreamingContent('');
+      setStreamingContentBlocks([]);
+      setCurrentToolCalls([]);
+      resetStreamingState();
       setIsLoading(false);
       return;
     }
@@ -298,6 +339,12 @@ export function Chat() {
 
     try {
       abortControllerRef.current = new AbortController();
+      // Combine user abort with a 5-minute streaming timeout
+      const timeoutSignal = AbortSignal.timeout(300000); // 5 minutes
+      const combinedSignal = AbortSignal.any([
+        abortControllerRef.current.signal,
+        timeoutSignal,
+      ]);
 
       // Find project for this conversation
       const currentProject = conv.projectId
@@ -342,7 +389,7 @@ export function Chat() {
           memorySearchEnabled: settings.memorySearchEnabled,
           toolExecutions,
         }),
-        signal: abortControllerRef.current.signal,
+        signal: combinedSignal,
       });
 
       if (!response.ok) {
@@ -677,24 +724,20 @@ export function Chat() {
               }
               setStreamingContentBlocks([...contentBlocksAccumulator]);
 
-              // Process each tool call
-              for (let i = 0; i < parsed.tool_calls.length; i++) {
-                const tc = parsed.tool_calls[i] as {
+              // Process all tool calls in parallel
+              const toolCallPromises = parsed.tool_calls.map(async (
+                tc: {
                   id: string;
                   name: string;
-                  originalName?: string; // Prefixed name for API
+                  originalName?: string;
                   params: Record<string, unknown>;
                   source?: ToolSource;
                   serverId?: string;
-                  thoughtSignature?: string; // Gemini 3 thought signature
-                };
+                  thoughtSignature?: string;
+                },
+                i: number
+              ) => {
                 const toolCall = newToolCalls[i];
-
-                // Small delay between parallel calls
-                if (i > 0) {
-                  await new Promise(resolve => setTimeout(resolve, 100));
-                }
-
                 let formattedResult = '';
                 let isError = false;
 
@@ -740,7 +783,13 @@ export function Chat() {
                   isError = true;
                 }
 
-                // Update tool call status
+                return { toolCall, tc, formattedResult, isError };
+              });
+
+              const results = await Promise.all(toolCallPromises);
+
+              // Batch state updates after all promises resolve
+              for (const { toolCall, tc, formattedResult, isError } of results) {
                 const toolCallIndex = toolCallsAccumulator.findIndex(t => t.id === toolCall.id);
                 if (toolCallIndex !== -1) {
                   const updatedToolCall = {
@@ -751,29 +800,29 @@ export function Chat() {
                     completedAt: Date.now(),
                   };
                   toolCallsAccumulator[toolCallIndex] = updatedToolCall;
-                  setCurrentToolCalls([...toolCallsAccumulator]);
 
-                  // Update the content block with the completed tool call
                   const blockIndex = contentBlocksAccumulator.findIndex(
                     b => b.type === 'tool_call' && b.toolCall.id === toolCall.id
                   );
                   if (blockIndex !== -1) {
                     contentBlocksAccumulator[blockIndex] = { type: 'tool_call', toolCall: updatedToolCall };
-                    setStreamingContentBlocks([...contentBlocksAccumulator]);
                   }
                 }
 
-                // Add to tool executions
                 allToolExecutions.push({
                   toolCallId: toolCall.id,
                   toolName: tc.name,
-                  originalToolName: tc.originalName || tc.name, // Include prefixed name for API
+                  originalToolName: tc.originalName || tc.name,
                   toolParams: tc.params,
                   result: formattedResult,
                   isError,
-                  geminiThoughtSignature: tc.thoughtSignature, // Gemini 3 thought signature
+                  geminiThoughtSignature: tc.thoughtSignature,
                 });
               }
+
+              // Update UI once after all tool calls complete
+              setCurrentToolCalls([...toolCallsAccumulator]);
+              setStreamingContentBlocks([...contentBlocksAccumulator]);
 
               // If we have any tool executions, continue with them
               // Pass content blocks to preserve text and tool calls before the recursive call

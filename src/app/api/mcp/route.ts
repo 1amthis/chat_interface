@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mcpManager } from '@/lib/mcp/manager';
 import { getBuiltinTools } from '@/lib/mcp/builtin-tools';
-import type { MCPServerConfig, BuiltinToolsConfig, UnifiedTool } from '@/types';
+import { validateCSRF, mcpServerConfigArraySchema, builtinToolsConfigSchema } from '@/lib/mcp/server-config';
+import type { UnifiedTool } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,19 +27,32 @@ export async function GET() {
 
 // POST /api/mcp - Update MCP configuration and get tools
 export async function POST(request: NextRequest) {
+  // CSRF protection
+  if (!validateCSRF(request)) {
+    return NextResponse.json(
+      { error: 'CSRF validation failed: request must originate from the application' },
+      { status: 403 }
+    );
+  }
+
   try {
     const body = await request.json();
-    const {
-      mcpServers,
-      builtinTools,
-    }: {
-      mcpServers?: MCPServerConfig[];
-      builtinTools?: BuiltinToolsConfig;
-    } = body;
+    const { mcpServers, builtinTools } = body;
 
-    // Update MCP server configuration
-    if (mcpServers && Array.isArray(mcpServers)) {
-      await mcpManager.updateConfig(mcpServers);
+    // Validate MCP server configuration with zod
+    if (mcpServers !== undefined) {
+      const serverValidation = mcpServerConfigArraySchema.safeParse(mcpServers);
+      if (!serverValidation.success) {
+        return NextResponse.json(
+          {
+            error: 'Invalid MCP server configuration',
+            details: serverValidation.error.format(),
+          },
+          { status: 400 }
+        );
+      }
+
+      await mcpManager.updateConfig(serverValidation.data);
     }
 
     // Get all available tools
@@ -48,10 +62,14 @@ export async function POST(request: NextRequest) {
     const mcpTools = await mcpManager.getAvailableTools();
     tools.push(...mcpTools);
 
-    // Get built-in tools
+    // Get built-in tools (validate config if provided)
     if (builtinTools) {
-      const builtin = getBuiltinTools(builtinTools);
-      tools.push(...builtin);
+      const builtinValidation = builtinToolsConfigSchema.safeParse(builtinTools);
+      if (builtinValidation.success) {
+        const builtin = getBuiltinTools(builtinValidation.data);
+        tools.push(...builtin);
+      }
+      // If validation fails, silently skip builtin tools rather than failing the whole request
     }
 
     // Get server status

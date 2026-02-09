@@ -8,6 +8,29 @@ import type { MCPTool, MCPCallToolResult, MCPConnectionState, MCPServerInfo } fr
 const CONNECTION_TIMEOUT = 30000; // 30 seconds
 const TOOL_CALL_TIMEOUT = 60000; // 60 seconds
 
+/** Keys that should be redacted from log output */
+const SENSITIVE_HEADER_KEYS = new Set([
+  'authorization',
+  'x-api-key',
+  'cookie',
+  'proxy-authorization',
+  'x-auth-token',
+  'api-key',
+]);
+
+/** Redact sensitive header values for logging */
+function redactHeaders(headers: Record<string, string>): Record<string, string> {
+  const redacted: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (SENSITIVE_HEADER_KEYS.has(key.toLowerCase())) {
+      redacted[key] = '[REDACTED]';
+    } else {
+      redacted[key] = value;
+    }
+  }
+  return redacted;
+}
+
 export class MCPClient {
   private config: MCPServerConfig;
   private client: Client | null = null;
@@ -107,7 +130,7 @@ export class MCPClient {
               }
             }
             console.log(`[MCP] Fetch to ${url}`, {
-              headers: Object.fromEntries(mergedHeaders.entries()),
+              headers: redactHeaders(Object.fromEntries(mergedHeaders.entries())),
               method: init?.method || 'GET'
             });
             return fetch(url, { ...init, headers: mergedHeaders });

@@ -5,13 +5,33 @@ import type { MCPCallToolResult } from './types';
 
 /**
  * Parse a potentially prefixed tool name to extract source and original name
- * Formats: "toolname", "builtin_toolname", "mcp_serverId_toolname"
+ * New format: "toolname", "builtin__toolname", "mcp__serverId__toolname"
+ * Legacy format: "builtin_toolname", "mcp_serverId_toolname"
  */
 export function parseToolName(fullName: string): {
   source: ToolSource | 'other';
   name: string;
   serverId?: string;
 } {
+  // New format: mcp__serverId__toolName
+  if (fullName.startsWith('mcp__')) {
+    const rest = fullName.slice(5); // Remove 'mcp__'
+    const separatorIndex = rest.indexOf('__');
+    if (separatorIndex !== -1) {
+      const serverId = rest.slice(0, separatorIndex);
+      const name = rest.slice(separatorIndex + 2);
+      return { source: 'mcp', name, serverId };
+    }
+    // Fallback if format is unexpected
+    return { source: 'mcp', name: rest };
+  }
+
+  // New format: builtin__toolname
+  if (fullName.startsWith('builtin__')) {
+    return { source: 'builtin', name: fullName.slice(9) };
+  }
+
+  // Legacy format: mcp_serverId_toolName (backward compatibility)
   if (fullName.startsWith('mcp_')) {
     const parts = fullName.split('_');
     if (parts.length >= 3) {
@@ -23,6 +43,7 @@ export function parseToolName(fullName: string): {
     return { source: 'mcp', name: fullName.slice(4) };
   }
 
+  // Legacy format: builtin_toolname (backward compatibility)
   if (fullName.startsWith('builtin_')) {
     return { source: 'builtin', name: fullName.slice(8) };
   }
@@ -43,29 +64,30 @@ export function parseToolName(fullName: string): {
   return { source: 'other', name: fullName };
 }
 
+/** Build a namespaced tool name using __ delimiter (only [a-zA-Z0-9_-] allowed) */
+function buildToolName(tool: UnifiedTool): string {
+  if (tool.source === 'mcp' && tool.serverId) {
+    return `mcp__${tool.serverId}__${tool.name}`;
+  }
+  if (tool.source === 'builtin') {
+    return `builtin__${tool.name}`;
+  }
+  return tool.name;
+}
+
 /**
  * Convert UnifiedTool array to OpenAI ChatCompletionTool format
  * Adds prefixes to tool names for routing
  */
 export function toOpenAITools(tools: UnifiedTool[]): OpenAI.ChatCompletionTool[] {
-  return tools.map((tool) => {
-    // Create namespaced tool name
-    const toolName =
-      tool.source === 'mcp' && tool.serverId
-        ? `mcp_${tool.serverId}_${tool.name}`
-        : tool.source === 'builtin'
-        ? `builtin_${tool.name}`
-        : tool.name;
-
-    return {
-      type: 'function',
-      function: {
-        name: toolName,
-        description: tool.description,
-        parameters: tool.parameters as OpenAI.FunctionParameters,
-      },
-    };
-  });
+  return tools.map((tool) => ({
+    type: 'function',
+    function: {
+      name: buildToolName(tool),
+      description: tool.description,
+      parameters: tool.parameters as OpenAI.FunctionParameters,
+    },
+  }));
 }
 
 /**
@@ -73,21 +95,11 @@ export function toOpenAITools(tools: UnifiedTool[]): OpenAI.ChatCompletionTool[]
  * Adds prefixes to tool names for routing
  */
 export function toAnthropicTools(tools: UnifiedTool[]): Anthropic.Tool[] {
-  return tools.map((tool) => {
-    // Create namespaced tool name
-    const toolName =
-      tool.source === 'mcp' && tool.serverId
-        ? `mcp_${tool.serverId}_${tool.name}`
-        : tool.source === 'builtin'
-        ? `builtin_${tool.name}`
-        : tool.name;
-
-    return {
-      name: toolName,
-      description: tool.description,
-      input_schema: tool.parameters as Anthropic.Tool.InputSchema,
-    };
-  });
+  return tools.map((tool) => ({
+    name: buildToolName(tool),
+    description: tool.description,
+    input_schema: tool.parameters as Anthropic.Tool.InputSchema,
+  }));
 }
 
 /**
@@ -97,21 +109,11 @@ export function toAnthropicTools(tools: UnifiedTool[]): Anthropic.Tool[] {
 export function toGeminiTools(tools: UnifiedTool[]): {
   functionDeclarations: Array<Record<string, unknown>>;
 } {
-  const functionDeclarations = tools.map((tool) => {
-    // Create namespaced tool name
-    const toolName =
-      tool.source === 'mcp' && tool.serverId
-        ? `mcp_${tool.serverId}_${tool.name}`
-        : tool.source === 'builtin'
-        ? `builtin_${tool.name}`
-        : tool.name;
-
-    return {
-      name: toolName,
-      description: tool.description,
-      parameters: tool.parameters,
-    };
-  });
+  const functionDeclarations = tools.map((tool) => ({
+    name: buildToolName(tool),
+    description: tool.description,
+    parameters: tool.parameters,
+  }));
 
   return { functionDeclarations };
 }
