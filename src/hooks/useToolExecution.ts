@@ -3,8 +3,8 @@
  */
 
 import { useState, useCallback } from 'react';
-import { ChatSettings, WebSearchResponse, GoogleDriveSearchResponse, ToolSource } from '@/types';
-import { saveSettings } from '@/lib/storage';
+import { ChatSettings, WebSearchResponse, GoogleDriveSearchResponse, ToolSource, Artifact, ArtifactType, ArtifactVersion } from '@/types';
+import { saveSettings, generateId } from '@/lib/storage';
 import { API_CONFIG } from '@/lib/constants';
 import { searchMemory, formatSearchResultsForAI, MemorySearchResult } from '@/lib/memory-search';
 import { searchRAG, formatRAGResultsForAI, RAGSearchResult } from '@/lib/rag';
@@ -12,6 +12,13 @@ import { searchRAG, formatRAGResultsForAI, RAGSearchResult } from '@/lib/rag';
 export interface UseToolExecutionOptions {
   settings: ChatSettings;
   setSettings: (settings: ChatSettings) => void;
+}
+
+export interface ArtifactToolCallResult {
+  result: string;
+  isError: boolean;
+  newArtifact?: Artifact;
+  updatedArtifact?: Artifact;
 }
 
 export interface UseToolExecutionReturn {
@@ -32,6 +39,11 @@ export interface UseToolExecutionReturn {
     source: ToolSource,
     serverId?: string
   ) => Promise<{ result: string; isError: boolean }>;
+  performArtifactToolCall: (
+    toolName: string,
+    params: Record<string, unknown>,
+    currentArtifacts: Artifact[]
+  ) => ArtifactToolCallResult;
   generateToolCallId: () => string;
 }
 
@@ -284,6 +296,117 @@ export function useToolExecution({
     }
   }, [settings.openaiKey]);
 
+  // Execute artifact tool calls client-side (no API call needed)
+  const performArtifactToolCall = useCallback((
+    toolName: string,
+    params: Record<string, unknown>,
+    currentArtifacts: Artifact[]
+  ): ArtifactToolCallResult => {
+    const VALID_ARTIFACT_TYPES: ArtifactType[] = ['code', 'html', 'react', 'markdown', 'svg', 'mermaid'];
+
+    if (toolName === 'create_artifact') {
+      const type = params.type as string;
+      const title = params.title as string;
+      const content = params.content as string;
+      const language = params.language as string | undefined;
+
+      if (!type || !title || !content) {
+        return { result: 'Error: create_artifact requires type, title, and content parameters.', isError: true };
+      }
+      if (!VALID_ARTIFACT_TYPES.includes(type as ArtifactType)) {
+        return { result: `Error: Invalid artifact type "${type}". Valid types: ${VALID_ARTIFACT_TYPES.join(', ')}`, isError: true };
+      }
+
+      const newArtifact: Artifact = {
+        id: generateId(),
+        type: type as ArtifactType,
+        title,
+        content,
+        language: type === 'code' ? language : undefined,
+        versions: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      return {
+        result: JSON.stringify({ success: true, artifact_id: newArtifact.id, title: newArtifact.title, type: newArtifact.type }),
+        isError: false,
+        newArtifact,
+      };
+    }
+
+    if (toolName === 'update_artifact') {
+      const artifactId = params.artifact_id as string;
+      const content = params.content as string;
+      const newTitle = params.title as string | undefined;
+
+      if (!artifactId || !content) {
+        return { result: 'Error: update_artifact requires artifact_id and content parameters.', isError: true };
+      }
+
+      const existing = currentArtifacts.find(a => a.id === artifactId);
+      if (!existing) {
+        const availableIds = currentArtifacts.map(a => `  - ${a.id} ("${a.title}")`).join('\n');
+        return {
+          result: `Error: Artifact with ID "${artifactId}" not found.${availableIds ? `\nAvailable artifacts:\n${availableIds}` : '\nNo artifacts exist in this conversation.'}`,
+          isError: true,
+        };
+      }
+
+      // Push current content to versions
+      const version: ArtifactVersion = {
+        id: generateId(),
+        content: existing.content,
+        createdAt: existing.updatedAt,
+      };
+
+      const updatedArtifact: Artifact = {
+        ...existing,
+        content,
+        title: newTitle || existing.title,
+        versions: [...existing.versions, version],
+        updatedAt: Date.now(),
+      };
+
+      return {
+        result: JSON.stringify({ success: true, artifact_id: updatedArtifact.id, title: updatedArtifact.title, version: updatedArtifact.versions.length }),
+        isError: false,
+        updatedArtifact,
+      };
+    }
+
+    if (toolName === 'read_artifact') {
+      const artifactId = params.artifact_id as string;
+
+      if (!artifactId) {
+        return { result: 'Error: read_artifact requires artifact_id parameter.', isError: true };
+      }
+
+      const existing = currentArtifacts.find(a => a.id === artifactId);
+      if (!existing) {
+        const availableIds = currentArtifacts.map(a => `  - ${a.id} ("${a.title}")`).join('\n');
+        return {
+          result: `Error: Artifact with ID "${artifactId}" not found.${availableIds ? `\nAvailable artifacts:\n${availableIds}` : '\nNo artifacts exist in this conversation.'}`,
+          isError: true,
+        };
+      }
+
+      return {
+        result: JSON.stringify({
+          artifact_id: existing.id,
+          type: existing.type,
+          title: existing.title,
+          language: existing.language,
+          content: existing.content,
+          versions: existing.versions.length,
+        }),
+        isError: false,
+      };
+    }
+
+    return { result: `Error: Unknown artifact tool "${toolName}".`, isError: true };
+  }, []);
+
   // Helper to generate unique IDs for tool calls
   const generateToolCallId = useCallback(() => {
     return `tc_${crypto.randomUUID()}`;
@@ -297,6 +420,7 @@ export function useToolExecution({
     performMemorySearch,
     performRAGSearch,
     performMCPToolCall,
+    performArtifactToolCall,
     generateToolCallId,
   };
 }

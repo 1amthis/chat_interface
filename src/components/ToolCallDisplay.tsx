@@ -27,12 +27,20 @@ function getStatusIcon(status: ToolCall['status']): string {
 function getToolIcon(name: string): string {
   if (name === 'web_search') return '🔍';
   if (name === 'google_drive_search') return '📁';
+  if (name === 'create_artifact') return '🎨';
+  if (name === 'update_artifact') return '✏️';
+  if (name === 'read_artifact') return '📄';
   if (name.startsWith('builtin_')) return '🔧';
   if (name.startsWith('mcp_')) return '🔌';
   return '⚙️';
 }
 
 function getToolDisplayName(name: string): string {
+  // Artifact tool display names
+  if (name === 'create_artifact') return 'Create Artifact';
+  if (name === 'update_artifact') return 'Update Artifact';
+  if (name === 'read_artifact') return 'Read Artifact';
+
   // Remove prefixes for cleaner display
   let displayName = name;
   if (name.startsWith('builtin_')) {

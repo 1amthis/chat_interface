@@ -15,7 +15,7 @@ export type {
 } from './types';
 
 // Re-export shared utilities
-export { mergeSystemPrompts, isOpenAIReasoningModel, generateGeminiToolCallId } from './base';
+export { mergeSystemPrompts, isOpenAIReasoningModel, generateGeminiToolCallId, buildArtifactSystemPrompt, isArtifactTool } from './base';
 
 // Re-export tool definitions
 export {
@@ -23,18 +23,31 @@ export {
   GOOGLE_DRIVE_SCHEMA,
   MEMORY_SEARCH_SCHEMA,
   RAG_SEARCH_SCHEMA,
+  ARTIFACT_TOOL_NAMES,
   openAIWebSearchTool,
   openAIGoogleDriveTool,
   openAIMemorySearchTool,
   openAIRAGSearchTool,
+  openAICreateArtifactTool,
+  openAIUpdateArtifactTool,
+  openAIReadArtifactTool,
   anthropicWebSearchTool,
   anthropicGoogleDriveTool,
   anthropicMemorySearchTool,
   anthropicRAGSearchTool,
+  anthropicCreateArtifactTool,
+  anthropicUpdateArtifactTool,
+  anthropicReadArtifactTool,
   geminiWebSearchDeclaration,
   geminiGoogleDriveDeclaration,
   geminiMemorySearchDeclaration,
   geminiRAGSearchDeclaration,
+  geminiCreateArtifactDeclaration,
+  geminiUpdateArtifactDeclaration,
+  geminiReadArtifactDeclaration,
+  toResponsesAPICreateArtifactTool,
+  toResponsesAPIUpdateArtifactTool,
+  toResponsesAPIReadArtifactTool,
 } from './tools/definitions';
 
 // Import provider implementations

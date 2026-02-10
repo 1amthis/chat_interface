@@ -184,6 +184,189 @@ export const geminiRAGSearchDeclaration = {
   parameters: RAG_SEARCH_SCHEMA.parameters,
 };
 
+// Artifact tool schemas
+export const CREATE_ARTIFACT_SCHEMA: ToolSchema = {
+  name: 'create_artifact',
+  description: 'Create a new artifact (code, HTML, React component, SVG, Markdown, or Mermaid diagram). Use this for substantial, self-contained content that benefits from a dedicated preview panel. Do NOT use this for short code snippets shown inline in conversation.',
+  parameters: {
+    type: 'object',
+    properties: {
+      type: {
+        type: 'string',
+        description: 'The artifact type: "code", "html", "react", "svg", "markdown", or "mermaid"',
+      },
+      title: {
+        type: 'string',
+        description: 'A short descriptive title for the artifact',
+      },
+      content: {
+        type: 'string',
+        description: 'The full content of the artifact',
+      },
+      language: {
+        type: 'string',
+        description: 'Programming language for code artifacts (e.g. "python", "javascript", "typescript"). Only needed when type is "code".',
+      },
+    },
+    required: ['type', 'title', 'content'],
+  },
+};
+
+export const UPDATE_ARTIFACT_SCHEMA: ToolSchema = {
+  name: 'update_artifact',
+  description: 'Update an existing artifact with new content. Always provide the complete updated content, not a diff. Use read_artifact first if you need to see the current content.',
+  parameters: {
+    type: 'object',
+    properties: {
+      artifact_id: {
+        type: 'string',
+        description: 'The ID of the artifact to update',
+      },
+      content: {
+        type: 'string',
+        description: 'The complete new content for the artifact (not a diff)',
+      },
+      title: {
+        type: 'string',
+        description: 'Optional new title for the artifact',
+      },
+    },
+    required: ['artifact_id', 'content'],
+  },
+};
+
+export const READ_ARTIFACT_SCHEMA: ToolSchema = {
+  name: 'read_artifact',
+  description: 'Read the current content of an existing artifact. Use this before update_artifact if the artifact content is not in the recent conversation context.',
+  parameters: {
+    type: 'object',
+    properties: {
+      artifact_id: {
+        type: 'string',
+        description: 'The ID of the artifact to read',
+      },
+    },
+    required: ['artifact_id'],
+  },
+};
+
+export const ARTIFACT_TOOL_NAMES = ['create_artifact', 'update_artifact', 'read_artifact'];
+
+// OpenAI format artifact tools
+export const openAICreateArtifactTool: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: CREATE_ARTIFACT_SCHEMA.name,
+    description: CREATE_ARTIFACT_SCHEMA.description,
+    parameters: CREATE_ARTIFACT_SCHEMA.parameters,
+  },
+};
+
+export const openAIUpdateArtifactTool: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: UPDATE_ARTIFACT_SCHEMA.name,
+    description: UPDATE_ARTIFACT_SCHEMA.description,
+    parameters: UPDATE_ARTIFACT_SCHEMA.parameters,
+  },
+};
+
+export const openAIReadArtifactTool: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: READ_ARTIFACT_SCHEMA.name,
+    description: READ_ARTIFACT_SCHEMA.description,
+    parameters: READ_ARTIFACT_SCHEMA.parameters,
+  },
+};
+
+// Anthropic format artifact tools
+export const anthropicCreateArtifactTool: Anthropic.Tool = {
+  name: CREATE_ARTIFACT_SCHEMA.name,
+  description: CREATE_ARTIFACT_SCHEMA.description,
+  input_schema: {
+    type: 'object' as const,
+    properties: CREATE_ARTIFACT_SCHEMA.parameters.properties,
+    required: CREATE_ARTIFACT_SCHEMA.parameters.required,
+  },
+};
+
+export const anthropicUpdateArtifactTool: Anthropic.Tool = {
+  name: UPDATE_ARTIFACT_SCHEMA.name,
+  description: UPDATE_ARTIFACT_SCHEMA.description,
+  input_schema: {
+    type: 'object' as const,
+    properties: UPDATE_ARTIFACT_SCHEMA.parameters.properties,
+    required: UPDATE_ARTIFACT_SCHEMA.parameters.required,
+  },
+};
+
+export const anthropicReadArtifactTool: Anthropic.Tool = {
+  name: READ_ARTIFACT_SCHEMA.name,
+  description: READ_ARTIFACT_SCHEMA.description,
+  input_schema: {
+    type: 'object' as const,
+    properties: READ_ARTIFACT_SCHEMA.parameters.properties,
+    required: READ_ARTIFACT_SCHEMA.parameters.required,
+  },
+};
+
+// Gemini format artifact tools
+export const geminiCreateArtifactDeclaration = {
+  name: CREATE_ARTIFACT_SCHEMA.name,
+  description: CREATE_ARTIFACT_SCHEMA.description,
+  parameters: CREATE_ARTIFACT_SCHEMA.parameters,
+};
+
+export const geminiUpdateArtifactDeclaration = {
+  name: UPDATE_ARTIFACT_SCHEMA.name,
+  description: UPDATE_ARTIFACT_SCHEMA.description,
+  parameters: UPDATE_ARTIFACT_SCHEMA.parameters,
+};
+
+export const geminiReadArtifactDeclaration = {
+  name: READ_ARTIFACT_SCHEMA.name,
+  description: READ_ARTIFACT_SCHEMA.description,
+  parameters: READ_ARTIFACT_SCHEMA.parameters,
+};
+
+// Responses API format artifact tools (for OpenAI reasoning models)
+export function toResponsesAPICreateArtifactTool() {
+  return {
+    type: 'function',
+    name: CREATE_ARTIFACT_SCHEMA.name,
+    description: CREATE_ARTIFACT_SCHEMA.description,
+    parameters: {
+      ...CREATE_ARTIFACT_SCHEMA.parameters,
+      additionalProperties: false,
+    },
+  };
+}
+
+export function toResponsesAPIUpdateArtifactTool() {
+  return {
+    type: 'function',
+    name: UPDATE_ARTIFACT_SCHEMA.name,
+    description: UPDATE_ARTIFACT_SCHEMA.description,
+    parameters: {
+      ...UPDATE_ARTIFACT_SCHEMA.parameters,
+      additionalProperties: false,
+    },
+  };
+}
+
+export function toResponsesAPIReadArtifactTool() {
+  return {
+    type: 'function',
+    name: READ_ARTIFACT_SCHEMA.name,
+    description: READ_ARTIFACT_SCHEMA.description,
+    parameters: {
+      ...READ_ARTIFACT_SCHEMA.parameters,
+      additionalProperties: false,
+    },
+  };
+}
+
 // Responses API format tools (for OpenAI reasoning models)
 export function toResponsesAPIWebSearchTool() {
   return {

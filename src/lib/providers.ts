@@ -18,9 +18,12 @@ export {
   mergeSystemPrompts,
   isOpenAIReasoningModel,
   generateGeminiToolCallId,
+  buildArtifactSystemPrompt,
+  isArtifactTool,
   // Tool definitions (for advanced use cases)
   WEB_SEARCH_SCHEMA,
   GOOGLE_DRIVE_SCHEMA,
+  ARTIFACT_TOOL_NAMES,
   openAIWebSearchTool,
   openAIGoogleDriveTool,
   anthropicWebSearchTool,

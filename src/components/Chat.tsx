@@ -13,7 +13,7 @@ import {
   generateTitle,
   getProjects,
 } from '@/lib/storage';
-import { mergeSystemPrompts } from '@/lib/providers';
+import { mergeSystemPrompts, buildArtifactSystemPrompt, isArtifactTool } from '@/lib/providers';
 import { processStreamingChunk } from '@/lib/artifact-parser';
 import { MAX_TOOL_RECURSION_DEPTH } from '@/lib/constants';
 import { Sidebar } from './Sidebar';
@@ -105,6 +105,7 @@ export function Chat() {
     performMemorySearch,
     performRAGSearch,
     performMCPToolCall,
+    performArtifactToolCall,
     generateToolCallId,
   } = useToolExecution({
     settings,
@@ -353,11 +354,21 @@ export function Chat() {
         : undefined;
 
       // Merge system prompts: global + project + conversation
-      const mergedSystemPrompt = mergeSystemPrompts(
+      const baseSystemPrompt = mergeSystemPrompts(
         settings.systemPrompt,
         currentProject?.instructions,
         conv.systemPrompt
       );
+
+      // Append artifact tool instructions (with list of existing artifacts)
+      // Only for providers that support tool calling (not Ollama)
+      const allCurrentArtifacts = [...(conv.artifacts || []), ...streamingArtifactsRef.current];
+      const artifactPrompt = settings.provider !== 'ollama'
+        ? buildArtifactSystemPrompt(allCurrentArtifacts.length > 0 ? allCurrentArtifacts : undefined)
+        : undefined;
+      const mergedSystemPrompt = artifactPrompt
+        ? (baseSystemPrompt ? `${baseSystemPrompt}\n\n${artifactPrompt}` : artifactPrompt)
+        : baseSystemPrompt;
 
       // Add project files to first user message
       const messagesWithProjectFiles = conv.messages.map((m, idx) => {
@@ -598,6 +609,80 @@ export function Chat() {
                 const allExecs = [...(toolExecutions || []), toolExecution];
                 await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
                 return;
+              } else if (isArtifactTool(toolName)) {
+                // Artifact tool call - execute client-side
+                const allCurrentArtifacts = [...(conv.artifacts || []), ...streamingArtifactsRef.current];
+                const artifactResult = performArtifactToolCall(toolName, toolParams, allCurrentArtifacts);
+
+                // Handle new/updated artifacts
+                if (artifactResult.newArtifact) {
+                  streamingArtifactsRef.current = [...streamingArtifactsRef.current, artifactResult.newArtifact];
+                  // Add artifact content block so it appears in the message
+                  contentBlocksAccumulator.push({
+                    type: 'artifact',
+                    artifactId: artifactResult.newArtifact.id,
+                  } as ArtifactContentBlock);
+                }
+                if (artifactResult.updatedArtifact) {
+                  // Update the artifact in streamingArtifactsRef or conv.artifacts
+                  const updatedId = artifactResult.updatedArtifact.id;
+                  const streamIdx = streamingArtifactsRef.current.findIndex(a => a.id === updatedId);
+                  if (streamIdx !== -1) {
+                    streamingArtifactsRef.current = streamingArtifactsRef.current.map(a =>
+                      a.id === updatedId ? artifactResult.updatedArtifact! : a
+                    );
+                  } else {
+                    // Artifact was from conv.artifacts - promote to streaming artifacts with updated content
+                    const existingArtifacts = (conv.artifacts || []).map(a =>
+                      a.id === updatedId ? artifactResult.updatedArtifact! : a
+                    );
+                    conv = { ...conv, artifacts: existingArtifacts };
+                  }
+                  // Add artifact content block so the updated artifact appears inline
+                  contentBlocksAccumulator.push({
+                    type: 'artifact',
+                    artifactId: updatedId,
+                  } as ArtifactContentBlock);
+                }
+
+                // Update the tool call status in the accumulator
+                const toolCallIndex = toolCallsAccumulator.findIndex(tc => tc.id === toolCall.id);
+                if (toolCallIndex !== -1) {
+                  const updatedToolCall = {
+                    ...toolCall,
+                    status: artifactResult.isError ? 'error' as const : 'completed' as const,
+                    result: artifactResult.result,
+                    error: artifactResult.isError ? artifactResult.result : undefined,
+                    completedAt: Date.now(),
+                  };
+                  toolCallsAccumulator[toolCallIndex] = updatedToolCall;
+                  setCurrentToolCalls([...toolCallsAccumulator]);
+
+                  const blockIndex = contentBlocksAccumulator.findIndex(
+                    b => b.type === 'tool_call' && b.toolCall.id === toolCall.id
+                  );
+                  if (blockIndex !== -1) {
+                    contentBlocksAccumulator[blockIndex] = { type: 'tool_call', toolCall: updatedToolCall };
+                  }
+                  setStreamingContentBlocks([...contentBlocksAccumulator]);
+                }
+
+                // Create tool execution result for the API
+                const toolExecution: ToolExecutionResult = {
+                  toolCallId: toolCall.id,
+                  toolName,
+                  originalToolName,
+                  toolParams,
+                  result: artifactResult.result,
+                  isError: artifactResult.isError,
+                  anthropicThinkingSignature,
+                  anthropicThinking,
+                  geminiThoughtSignature: anthropicThinkingSignature,
+                };
+
+                const allExecs = [...(toolExecutions || []), toolExecution];
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
+                return;
               } else if (toolName === 'web_search' || toolName === 'google_drive_search' || toolName === 'memory_search' || toolName === 'rag_search') {
                 // Web search, Google Drive search, or Memory search - handle as proper tool results
                 const searchQuery = toolParams.query as string;
@@ -793,6 +878,29 @@ export function Chat() {
                       formattedResult = 'Document search failed.';
                       isError = true;
                     }
+                  } else if (isArtifactTool(tc.name)) {
+                    const allCurrentArtifacts = [...(conv.artifacts || []), ...streamingArtifactsRef.current];
+                    const artifactResult = performArtifactToolCall(tc.name, tc.params, allCurrentArtifacts);
+                    formattedResult = artifactResult.result;
+                    isError = artifactResult.isError;
+
+                    if (artifactResult.newArtifact) {
+                      streamingArtifactsRef.current = [...streamingArtifactsRef.current, artifactResult.newArtifact];
+                    }
+                    if (artifactResult.updatedArtifact) {
+                      const updatedId = artifactResult.updatedArtifact.id;
+                      const streamIdx = streamingArtifactsRef.current.findIndex(a => a.id === updatedId);
+                      if (streamIdx !== -1) {
+                        streamingArtifactsRef.current = streamingArtifactsRef.current.map(a =>
+                          a.id === updatedId ? artifactResult.updatedArtifact! : a
+                        );
+                      } else {
+                        const existingArtifacts = (conv.artifacts || []).map(a =>
+                          a.id === updatedId ? artifactResult.updatedArtifact! : a
+                        );
+                        conv = { ...conv, artifacts: existingArtifacts };
+                      }
+                    }
                   } else if (tc.source === 'mcp' || tc.source === 'builtin') {
                     const mcpResult = await performMCPToolCall(tc.name, tc.params, tc.source, tc.serverId);
                     formattedResult = mcpResult.result;
@@ -826,6 +934,21 @@ export function Chat() {
                   );
                   if (blockIndex !== -1) {
                     contentBlocksAccumulator[blockIndex] = { type: 'tool_call', toolCall: updatedToolCall };
+                  }
+                }
+
+                // Add artifact content block for create/update artifact tool calls
+                if (isArtifactTool(tc.name) && !isError) {
+                  try {
+                    const resultData = JSON.parse(formattedResult);
+                    if (resultData.artifact_id && (tc.name === 'create_artifact' || tc.name === 'update_artifact')) {
+                      contentBlocksAccumulator.push({
+                        type: 'artifact',
+                        artifactId: resultData.artifact_id,
+                      } as ArtifactContentBlock);
+                    }
+                  } catch {
+                    // Ignore parse errors
                   }
                 }
 
@@ -957,7 +1080,7 @@ export function Chat() {
       setCurrentToolCalls([]);
       resetStreamingState();
     }
-  }, [settings, projects, performSearch, performDriveSearch, performMemorySearch, performRAGSearch, performMCPToolCall, resetStreamingState, artifactParseStateRef, generateToolCallId, setSearchStatus, streamingArtifactsRef]);
+  }, [settings, projects, performSearch, performDriveSearch, performMemorySearch, performRAGSearch, performMCPToolCall, performArtifactToolCall, resetStreamingState, artifactParseStateRef, generateToolCallId, setSearchStatus, streamingArtifactsRef]);
 
   const handleSend = useCallback(async (content: string, attachments: Attachment[] = []) => {
     const userMessage: Message = {

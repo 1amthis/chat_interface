@@ -7,7 +7,8 @@ import { ChatMessage, StreamChunk, ToolExecutionResult } from '../types';
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
 import { toolCallLimitReached } from '../base';
 import { toAnthropicTools, parseToolName } from '@/lib/mcp/tool-converter';
-import { anthropicWebSearchTool, anthropicGoogleDriveTool, anthropicMemorySearchTool, anthropicRAGSearchTool } from '../tools/definitions';
+import { anthropicWebSearchTool, anthropicGoogleDriveTool, anthropicMemorySearchTool, anthropicRAGSearchTool, anthropicCreateArtifactTool, anthropicUpdateArtifactTool, anthropicReadArtifactTool } from '../tools/definitions';
+import { isArtifactTool } from '../base';
 import { toAnthropicContent } from './content';
 
 /**
@@ -160,6 +161,8 @@ export async function* streamAnthropic(
   if (mcpTools && mcpTools.length > 0) {
     tools.push(...toAnthropicTools(mcpTools));
   }
+  // Artifact tools are always available
+  tools.push(anthropicCreateArtifactTool, anthropicUpdateArtifactTool, anthropicReadArtifactTool);
   if (tools.length > 0) {
     requestOptions.tools = tools;
   }
@@ -266,6 +269,16 @@ export async function* streamAnthropic(
             originalToolName: currentToolName,
             toolParams: { query: args.query },
             toolSource: 'rag_search',
+            toolThinkingSignature: currentThinkingSignature || undefined,
+          };
+        } else if (isArtifactTool(currentToolName)) {
+          yield {
+            type: 'tool_call',
+            toolCallId: currentToolId,
+            toolName: currentToolName,
+            originalToolName: currentToolName,
+            toolParams: args,
+            toolSource: 'artifact',
             toolThinkingSignature: currentThinkingSignature || undefined,
           };
         }

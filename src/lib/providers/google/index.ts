@@ -6,7 +6,8 @@ import { ChatMessage, StreamChunk, ToolCallInfo, ToolExecutionResult } from '../
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
 import { toGeminiTools, parseToolName } from '@/lib/mcp/tool-converter';
 import { toolCallLimitReached, generateGeminiToolCallId } from '../base';
-import { geminiWebSearchDeclaration, geminiGoogleDriveDeclaration, geminiMemorySearchDeclaration, geminiRAGSearchDeclaration } from '../tools/definitions';
+import { geminiWebSearchDeclaration, geminiGoogleDriveDeclaration, geminiMemorySearchDeclaration, geminiRAGSearchDeclaration, geminiCreateArtifactDeclaration, geminiUpdateArtifactDeclaration, geminiReadArtifactDeclaration } from '../tools/definitions';
+import { isArtifactTool } from '../base';
 import { toGeminiParts } from './content';
 
 /**
@@ -119,6 +120,8 @@ export async function* streamGoogle(
   if (mcpTools && mcpTools.length > 0) {
     functionDeclarations.push(...toGeminiTools(mcpTools).functionDeclarations);
   }
+  // Artifact tools are always available
+  functionDeclarations.push(geminiCreateArtifactDeclaration, geminiUpdateArtifactDeclaration, geminiReadArtifactDeclaration);
 
   if (functionDeclarations.length > 0) {
     requestBody.tools = [{ functionDeclarations }];
@@ -248,6 +251,15 @@ export async function* streamGoogle(
               originalName: rawName,
               params,
               source: 'rag_search',
+              thoughtSignature,
+            });
+          } else if (isArtifactTool(rawName)) {
+            toolCallsInCandidate.push({
+              id,
+              name: rawName,
+              originalName: rawName,
+              params,
+              source: 'artifact',
               thoughtSignature,
             });
           } else {

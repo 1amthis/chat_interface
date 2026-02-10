@@ -7,7 +7,8 @@ import { ChatMessage, StreamChunk, ToolCallInfo, ToolExecutionResult } from '../
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse, ToolSource } from '@/types';
 import { toolCallLimitReached } from '../base';
 import { toOpenAITools, parseToolName } from '@/lib/mcp/tool-converter';
-import { openAIWebSearchTool, openAIGoogleDriveTool, openAIMemorySearchTool, openAIRAGSearchTool, toResponsesAPIWebSearchTool, toResponsesAPIGoogleDriveTool, toResponsesAPIMemorySearchTool, toResponsesAPIRAGSearchTool } from '../tools/definitions';
+import { openAIWebSearchTool, openAIGoogleDriveTool, openAIMemorySearchTool, openAIRAGSearchTool, openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool, toResponsesAPIWebSearchTool, toResponsesAPIGoogleDriveTool, toResponsesAPIMemorySearchTool, toResponsesAPIRAGSearchTool, toResponsesAPICreateArtifactTool, toResponsesAPIUpdateArtifactTool, toResponsesAPIReadArtifactTool } from '../tools/definitions';
+import { isArtifactTool } from '../base';
 import { toOpenAIContent } from './content';
 
 /**
@@ -116,6 +117,8 @@ export async function* streamOpenAI(
   if (mcpTools && mcpTools.length > 0) {
     tools.push(...toOpenAITools(mcpTools));
   }
+  // Artifact tools are always available (no settings toggle needed)
+  tools.push(openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool);
   if (tools.length > 0) {
     requestOptions.tools = tools;
     requestOptions.tool_choice = 'auto';
@@ -222,6 +225,14 @@ export async function* streamOpenAI(
               params: { query: args.query },
               source: 'rag_search',
             });
+          } else if (isArtifactTool(tc.name)) {
+            parsedToolCalls.push({
+              id: tc.id,
+              name: tc.name,
+              originalName: tc.name,
+              params: args,
+              source: 'artifact',
+            });
           }
         } catch (e) {
           // Invalid tool call arguments - warn instead of silently dropping
@@ -318,6 +329,11 @@ function toResponsesAPITools(
     }
   }
 
+  // Artifact tools are always available
+  tools.push(toResponsesAPICreateArtifactTool());
+  tools.push(toResponsesAPIUpdateArtifactTool());
+  tools.push(toResponsesAPIReadArtifactTool());
+
   return tools;
 }
 
@@ -350,10 +366,10 @@ export async function* streamOpenAIResponses(
 
     // Build content parts for this message
     const contentParts: Record<string, unknown>[] = [];
+    const textType = role === 'assistant' ? 'output_text' : 'input_text';
 
     // Add text content - use 'output_text' for assistant messages, 'input_text' for user messages
     if (msg.content) {
-      const textType = role === 'assistant' ? 'output_text' : 'input_text';
       contentParts.push({ type: textType, text: msg.content });
     }
 
@@ -551,6 +567,8 @@ export async function* streamOpenAIResponses(
             toolSource = 'memory_search';
           } else if (fc.name === 'rag_search') {
             toolSource = 'rag_search';
+          } else if (isArtifactTool(fc.name)) {
+            toolSource = 'artifact';
           } else if (fc.name.startsWith('mcp__')) {
             // New __ delimiter format: mcp__serverId__toolName
             toolSource = 'mcp';

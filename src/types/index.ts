@@ -128,7 +128,7 @@ export interface MCPServerConfig {
   headers?: Record<string, string>;
 }
 
-export type ToolSource = 'builtin' | 'mcp' | 'web_search' | 'google_drive' | 'memory_search' | 'rag_search';
+export type ToolSource = 'builtin' | 'mcp' | 'web_search' | 'google_drive' | 'memory_search' | 'rag_search' | 'artifact';
 
 export interface BuiltinToolsConfig {
   filesystem?: {
