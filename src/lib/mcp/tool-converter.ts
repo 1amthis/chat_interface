@@ -60,6 +60,10 @@ export function parseToolName(fullName: string): {
     return { source: 'memory_search', name: fullName };
   }
 
+  if (fullName === 'rag_search') {
+    return { source: 'rag_search', name: fullName };
+  }
+
   // Default: unknown source
   return { source: 'other', name: fullName };
 }

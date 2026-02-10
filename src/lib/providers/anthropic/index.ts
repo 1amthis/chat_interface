@@ -5,9 +5,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ChatMessage, StreamChunk, ToolExecutionResult } from '../types';
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
+import { toolCallLimitReached } from '../base';
 import { toAnthropicTools, parseToolName } from '@/lib/mcp/tool-converter';
-import { hasToolBeenExecuted } from '../base';
-import { anthropicWebSearchTool, anthropicGoogleDriveTool, anthropicMemorySearchTool } from '../tools/definitions';
+import { anthropicWebSearchTool, anthropicGoogleDriveTool, anthropicMemorySearchTool, anthropicRAGSearchTool } from '../tools/definitions';
 import { toAnthropicContent } from './content';
 
 /**
@@ -26,7 +26,8 @@ export async function* streamAnthropic(
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
   thinkingEnabled?: boolean,
-  thinkingBudgetTokens?: number
+  thinkingBudgetTokens?: number,
+  ragEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Anthropic API key is required');
 
@@ -141,16 +142,19 @@ export async function* streamAnthropic(
   }
 
   // Build tools array based on enabled features
-  // Don't include tools that have already been executed in this turn to prevent infinite loops
+  // Per-tool call limit prevents loops while allowing multiple calls with different queries
   const tools: Anthropic.Tool[] = [];
-  if (webSearchEnabled && !searchResults && !hasToolBeenExecuted('web_search', toolExecutions)) {
+  if (webSearchEnabled && !searchResults && !toolCallLimitReached('web_search', toolExecutions)) {
     tools.push(anthropicWebSearchTool);
   }
-  if (googleDriveEnabled && !driveSearchResults && !hasToolBeenExecuted('google_drive_search', toolExecutions)) {
+  if (googleDriveEnabled && !driveSearchResults && !toolCallLimitReached('google_drive_search', toolExecutions)) {
     tools.push(anthropicGoogleDriveTool);
   }
-  if (memorySearchEnabled && !hasToolBeenExecuted('memory_search', toolExecutions)) {
+  if (memorySearchEnabled && !toolCallLimitReached('memory_search', toolExecutions)) {
     tools.push(anthropicMemorySearchTool);
+  }
+  if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
+    tools.push(anthropicRAGSearchTool);
   }
   // Add MCP tools
   if (mcpTools && mcpTools.length > 0) {
@@ -252,6 +256,16 @@ export async function* streamAnthropic(
             originalToolName: currentToolName,
             toolParams: { query: args.query },
             toolSource: 'memory_search',
+            toolThinkingSignature: currentThinkingSignature || undefined,
+          };
+        } else if (currentToolName === 'rag_search') {
+          yield {
+            type: 'tool_call',
+            toolCallId: currentToolId,
+            toolName: currentToolName,
+            originalToolName: currentToolName,
+            toolParams: { query: args.query },
+            toolSource: 'rag_search',
             toolThinkingSignature: currentThinkingSignature || undefined,
           };
         }

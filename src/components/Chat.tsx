@@ -103,6 +103,7 @@ export function Chat() {
     performSearch,
     performDriveSearch,
     performMemorySearch,
+    performRAGSearch,
     performMCPToolCall,
     generateToolCallId,
   } = useToolExecution({
@@ -387,6 +388,7 @@ export function Chat() {
           googleDriveEnabled: settings.googleDriveEnabled && !!settings.googleDriveAccessToken,
           driveSearchResults,
           memorySearchEnabled: settings.memorySearchEnabled,
+          ragEnabled: settings.ragEnabled,
           toolExecutions,
         }),
         signal: combinedSignal,
@@ -592,10 +594,11 @@ export function Chat() {
                   geminiThoughtSignature: anthropicThinkingSignature, // Same field for Gemini 3
                 };
 
-                // Recursively call with tool execution and accumulated content blocks
-                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, [toolExecution], contentBlocksAccumulator, recursionDepth + 1);
+                // Recursively call with accumulated tool executions so model sees full history
+                const allExecs = [...(toolExecutions || []), toolExecution];
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
                 return;
-              } else if (toolName === 'web_search' || toolName === 'google_drive_search' || toolName === 'memory_search') {
+              } else if (toolName === 'web_search' || toolName === 'google_drive_search' || toolName === 'memory_search' || toolName === 'rag_search') {
                 // Web search, Google Drive search, or Memory search - handle as proper tool results
                 const searchQuery = toolParams.query as string;
 
@@ -649,6 +652,14 @@ export function Chat() {
                     formattedResult = 'Memory search failed. Please try again.';
                     isError = true;
                   }
+                } else if (toolName === 'rag_search') {
+                  const ragResult = await performRAGSearch(searchQuery);
+                  if (ragResult) {
+                    formattedResult = ragResult.formatted;
+                  } else {
+                    formattedResult = 'Document search failed. Please try again.';
+                    isError = true;
+                  }
                 }
 
                 // Update tool call with result
@@ -687,8 +698,9 @@ export function Chat() {
                   geminiThoughtSignature: anthropicThinkingSignature, // Same field for Gemini 3
                 };
 
-                // Recursively call with tool execution and accumulated content blocks
-                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, [toolExecution], contentBlocksAccumulator, recursionDepth + 1);
+                // Recursively call with accumulated tool executions so model sees full history
+                const allExecs = [...(toolExecutions || []), toolExecution];
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
                 return;
               }
             }
@@ -773,6 +785,14 @@ export function Chat() {
                       formattedResult = 'Memory search failed.';
                       isError = true;
                     }
+                  } else if (tc.name === 'rag_search') {
+                    const result = await performRAGSearch(tc.params.query as string);
+                    if (result) {
+                      formattedResult = result.formatted;
+                    } else {
+                      formattedResult = 'Document search failed.';
+                      isError = true;
+                    }
                   } else if (tc.source === 'mcp' || tc.source === 'builtin') {
                     const mcpResult = await performMCPToolCall(tc.name, tc.params, tc.source, tc.serverId);
                     formattedResult = mcpResult.result;
@@ -827,7 +847,8 @@ export function Chat() {
               // If we have any tool executions, continue with them
               // Pass content blocks to preserve text and tool calls before the recursive call
               if (allToolExecutions.length > 0) {
-                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allToolExecutions, contentBlocksAccumulator, recursionDepth + 1);
+                const allExecs = [...(toolExecutions || []), ...allToolExecutions];
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
                 return;
               }
             }
@@ -936,7 +957,7 @@ export function Chat() {
       setCurrentToolCalls([]);
       resetStreamingState();
     }
-  }, [settings, projects, performSearch, performDriveSearch, performMemorySearch, performMCPToolCall, resetStreamingState, artifactParseStateRef, generateToolCallId, setSearchStatus, streamingArtifactsRef]);
+  }, [settings, projects, performSearch, performDriveSearch, performMemorySearch, performRAGSearch, performMCPToolCall, resetStreamingState, artifactParseStateRef, generateToolCallId, setSearchStatus, streamingArtifactsRef]);
 
   const handleSend = useCallback(async (content: string, attachments: Attachment[] = []) => {
     const userMessage: Message = {

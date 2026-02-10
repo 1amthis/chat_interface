@@ -5,8 +5,8 @@
 import { ChatMessage, StreamChunk, ToolCallInfo, ToolExecutionResult } from '../types';
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
 import { toGeminiTools, parseToolName } from '@/lib/mcp/tool-converter';
-import { hasToolBeenExecuted, generateGeminiToolCallId } from '../base';
-import { geminiWebSearchDeclaration, geminiGoogleDriveDeclaration, geminiMemorySearchDeclaration } from '../tools/definitions';
+import { toolCallLimitReached, generateGeminiToolCallId } from '../base';
+import { geminiWebSearchDeclaration, geminiGoogleDriveDeclaration, geminiMemorySearchDeclaration, geminiRAGSearchDeclaration } from '../tools/definitions';
 import { toGeminiParts } from './content';
 
 /**
@@ -23,7 +23,8 @@ export async function* streamGoogle(
   driveSearchResults?: GoogleDriveSearchResponse,
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
-  toolExecutions?: ToolExecutionResult[]
+  toolExecutions?: ToolExecutionResult[],
+  ragEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Google Gemini API key is required');
 
@@ -100,17 +101,20 @@ export async function* streamGoogle(
   }
 
   // Build tools array based on enabled features and MCP tools
-  // Don't include tools that have already been executed in this turn to prevent infinite loops
+  // Per-tool call limit prevents loops while allowing multiple calls with different queries
   const functionDeclarations: Array<Record<string, unknown>> = [];
 
-  if (webSearchEnabled && !searchResults && !hasToolBeenExecuted('web_search', toolExecutions)) {
+  if (webSearchEnabled && !searchResults && !toolCallLimitReached('web_search', toolExecutions)) {
     functionDeclarations.push(geminiWebSearchDeclaration);
   }
-  if (googleDriveEnabled && !driveSearchResults && !hasToolBeenExecuted('google_drive_search', toolExecutions)) {
+  if (googleDriveEnabled && !driveSearchResults && !toolCallLimitReached('google_drive_search', toolExecutions)) {
     functionDeclarations.push(geminiGoogleDriveDeclaration);
   }
-  if (memorySearchEnabled && !hasToolBeenExecuted('memory_search', toolExecutions)) {
+  if (memorySearchEnabled && !toolCallLimitReached('memory_search', toolExecutions)) {
     functionDeclarations.push(geminiMemorySearchDeclaration);
+  }
+  if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
+    functionDeclarations.push(geminiRAGSearchDeclaration);
   }
   if (mcpTools && mcpTools.length > 0) {
     functionDeclarations.push(...toGeminiTools(mcpTools).functionDeclarations);
@@ -235,6 +239,15 @@ export async function* streamGoogle(
               originalName: rawName,
               params,
               source: 'memory_search',
+              thoughtSignature,
+            });
+          } else if (rawName === 'rag_search') {
+            toolCallsInCandidate.push({
+              id,
+              name: rawName,
+              originalName: rawName,
+              params,
+              source: 'rag_search',
               thoughtSignature,
             });
           } else {

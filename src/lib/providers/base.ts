@@ -36,15 +36,23 @@ export function isOpenAIReasoningModel(model: string): boolean {
 }
 
 /**
- * Check if a tool has already been executed in this turn
+ * Maximum number of times a single tool can be called per user message.
+ * Prevents loops while still allowing multiple searches with different queries.
  */
-export function hasToolBeenExecuted(
+const MAX_SAME_TOOL_CALLS = 3;
+
+/**
+ * Check if a tool has reached its per-tool call limit in this turn
+ */
+export function toolCallLimitReached(
   toolName: string,
   toolExecutions?: { toolName: string; originalToolName?: string }[]
 ): boolean {
-  return toolExecutions?.some(
+  if (!toolExecutions) return false;
+  const count = toolExecutions.filter(
     te => te.toolName === toolName || te.originalToolName === toolName
-  ) ?? false;
+  ).length;
+  return count >= MAX_SAME_TOOL_CALLS;
 }
 
 /**

@@ -65,6 +65,22 @@ export const MEMORY_SEARCH_SCHEMA: ToolSchema = {
   },
 };
 
+// RAG search tool schema
+export const RAG_SEARCH_SCHEMA: ToolSchema = {
+  name: 'rag_search',
+  description: 'Search through user-uploaded documents for relevant information. Use this when the user asks about content from their uploaded files, documents, or knowledge base. This performs semantic search across all uploaded documents.',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'The search query to find relevant content in uploaded documents. Use natural language to describe what you are looking for.',
+      },
+    },
+    required: ['query'],
+  },
+};
+
 // OpenAI format tools
 export const openAIWebSearchTool: OpenAI.ChatCompletionTool = {
   type: 'function',
@@ -90,6 +106,15 @@ export const openAIMemorySearchTool: OpenAI.ChatCompletionTool = {
     name: MEMORY_SEARCH_SCHEMA.name,
     description: MEMORY_SEARCH_SCHEMA.description,
     parameters: MEMORY_SEARCH_SCHEMA.parameters,
+  },
+};
+
+export const openAIRAGSearchTool: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: RAG_SEARCH_SCHEMA.name,
+    description: RAG_SEARCH_SCHEMA.description,
+    parameters: RAG_SEARCH_SCHEMA.parameters,
   },
 };
 
@@ -124,6 +149,16 @@ export const anthropicMemorySearchTool: Anthropic.Tool = {
   },
 };
 
+export const anthropicRAGSearchTool: Anthropic.Tool = {
+  name: RAG_SEARCH_SCHEMA.name,
+  description: RAG_SEARCH_SCHEMA.description,
+  input_schema: {
+    type: 'object' as const,
+    properties: RAG_SEARCH_SCHEMA.parameters.properties,
+    required: RAG_SEARCH_SCHEMA.parameters.required,
+  },
+};
+
 // Gemini format tools
 export const geminiWebSearchDeclaration = {
   name: WEB_SEARCH_SCHEMA.name,
@@ -141,6 +176,12 @@ export const geminiMemorySearchDeclaration = {
   name: MEMORY_SEARCH_SCHEMA.name,
   description: MEMORY_SEARCH_SCHEMA.description,
   parameters: MEMORY_SEARCH_SCHEMA.parameters,
+};
+
+export const geminiRAGSearchDeclaration = {
+  name: RAG_SEARCH_SCHEMA.name,
+  description: RAG_SEARCH_SCHEMA.description,
+  parameters: RAG_SEARCH_SCHEMA.parameters,
 };
 
 // Responses API format tools (for OpenAI reasoning models)
@@ -175,6 +216,18 @@ export function toResponsesAPIMemorySearchTool() {
     description: MEMORY_SEARCH_SCHEMA.description,
     parameters: {
       ...MEMORY_SEARCH_SCHEMA.parameters,
+      additionalProperties: false,
+    },
+  };
+}
+
+export function toResponsesAPIRAGSearchTool() {
+  return {
+    type: 'function',
+    name: RAG_SEARCH_SCHEMA.name,
+    description: RAG_SEARCH_SCHEMA.description,
+    parameters: {
+      ...RAG_SEARCH_SCHEMA.parameters,
       additionalProperties: false,
     },
   };

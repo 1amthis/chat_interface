@@ -128,7 +128,7 @@ export interface MCPServerConfig {
   headers?: Record<string, string>;
 }
 
-export type ToolSource = 'builtin' | 'mcp' | 'web_search' | 'google_drive' | 'memory_search';
+export type ToolSource = 'builtin' | 'mcp' | 'web_search' | 'google_drive' | 'memory_search' | 'rag_search';
 
 export interface BuiltinToolsConfig {
   filesystem?: {
@@ -170,6 +170,11 @@ export interface ChatSettings {
   builtinTools?: BuiltinToolsConfig;
   // Memory search settings
   memorySearchEnabled?: boolean;
+  // RAG search settings
+  ragEnabled?: boolean;
+  ragChunkStrategy?: 'paragraph' | 'fixed' | 'sentence' | 'markdown';
+  ragChunkSize?: number;    // 500–5000, default 2000
+  ragChunkOverlap?: number; // 0–500, default 200
 }
 
 export const DEFAULT_MODELS: Record<Provider, string[]> = {
@@ -357,6 +362,10 @@ export interface MemorySearchParams {
   query: string;
 }
 
+export interface RAGSearchParams {
+  query: string;
+}
+
 export interface FilesystemReadParams {
   path: string;
 }
@@ -383,6 +392,7 @@ export type KnownToolParams =
   | WebSearchParams
   | GoogleDriveSearchParams
   | MemorySearchParams
+  | RAGSearchParams
   | FilesystemReadParams
   | FilesystemWriteParams
   | ShellExecParams

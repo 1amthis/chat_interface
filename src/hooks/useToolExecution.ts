@@ -7,6 +7,7 @@ import { ChatSettings, WebSearchResponse, GoogleDriveSearchResponse, ToolSource 
 import { saveSettings } from '@/lib/storage';
 import { API_CONFIG } from '@/lib/constants';
 import { searchMemory, formatSearchResultsForAI, MemorySearchResult } from '@/lib/memory-search';
+import { searchRAG, formatRAGResultsForAI, RAGSearchResult } from '@/lib/rag';
 
 export interface UseToolExecutionOptions {
   settings: ChatSettings;
@@ -22,6 +23,9 @@ export interface UseToolExecutionReturn {
     query: string,
     excludeConversationId?: string
   ) => Promise<{ results: MemorySearchResult[]; formatted: string } | null>;
+  performRAGSearch: (
+    query: string
+  ) => Promise<{ results: RAGSearchResult[]; formatted: string } | null>;
   performMCPToolCall: (
     toolName: string,
     params: Record<string, unknown>,
@@ -251,6 +255,35 @@ export function useToolExecution({
     }
   }, []);
 
+  // Perform RAG search across uploaded documents
+  const performRAGSearch = useCallback(async (
+    query: string
+  ): Promise<{ results: RAGSearchResult[]; formatted: string } | null> => {
+    try {
+      if (!settings.openaiKey) {
+        return {
+          results: [],
+          formatted: 'RAG search requires an OpenAI API key for embeddings.',
+        };
+      }
+
+      setSearchStatus(`Searching documents: "${query}"`);
+
+      const results = await searchRAG(query, settings.openaiKey, { limit: 5 });
+
+      setSearchStatus(null);
+
+      return {
+        results,
+        formatted: formatRAGResultsForAI(results),
+      };
+    } catch (error) {
+      console.error('RAG search error:', error);
+      setSearchStatus(null);
+      return null;
+    }
+  }, [settings.openaiKey]);
+
   // Helper to generate unique IDs for tool calls
   const generateToolCallId = useCallback(() => {
     return `tc_${crypto.randomUUID()}`;
@@ -262,6 +295,7 @@ export function useToolExecution({
     performSearch,
     performDriveSearch,
     performMemorySearch,
+    performRAGSearch,
     performMCPToolCall,
     generateToolCallId,
   };

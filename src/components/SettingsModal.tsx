@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { ChatSettings, Provider, DEFAULT_MODELS, MCPServerConfig, BuiltinToolsConfig } from '@/types';
 import { getGoogleAuthUrl, isGoogleDriveConfigured } from '@/lib/googledrive';
 import { MCPSettingsSection } from './MCPSettingsSection';
+import { RAGSettingsSection } from './RAGSettingsSection';
 
 interface SettingsModalProps {
   settings: ChatSettings;
@@ -417,6 +418,44 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
                   Conversations are indexed locally using IndexedDB.
                 </p>
               </div>
+            )}
+          </div>
+
+          {/* RAG Document Search Section */}
+          <div className="border-t border-[var(--border-color)] pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <label className="block text-sm font-medium">Document Search (RAG)</label>
+                <p className="text-xs text-gray-500">
+                  Upload documents for AI to search through
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={localSettings.ragEnabled || false}
+                onClick={() => setLocalSettings({ ...localSettings, ragEnabled: !localSettings.ragEnabled })}
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                  localSettings.ragEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    localSettings.ragEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            {localSettings.ragEnabled && (
+              <RAGSettingsSection
+                openaiKey={localSettings.openaiKey}
+                chunkStrategy={localSettings.ragChunkStrategy}
+                chunkSize={localSettings.ragChunkSize}
+                chunkOverlap={localSettings.ragChunkOverlap}
+                onChunkSettingsChange={(settings) =>
+                  setLocalSettings({ ...localSettings, ...settings })
+                }
+              />
             )}
           </div>
 

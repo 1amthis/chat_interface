@@ -18,6 +18,7 @@ export async function POST(request: NextRequest) {
       googleDriveEnabled,
       driveSearchResults,
       memorySearchEnabled,
+      ragEnabled,
       toolExecutions,
     } = body as {
       messages: ChatMessage[];
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
       googleDriveEnabled?: boolean;
       driveSearchResults?: GoogleDriveSearchResponse;
       memorySearchEnabled?: boolean;
+      ragEnabled?: boolean;
       toolExecutions?: ToolExecutionResult[];
     };
 
@@ -65,7 +67,8 @@ export async function POST(request: NextRequest) {
             driveSearchResults,
             memorySearchEnabled,
             mcpTools.length > 0 ? mcpTools : undefined,
-            toolExecutions
+            toolExecutions,
+            ragEnabled
           )) {
             if (chunk.type === 'content') {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: chunk.content })}\n\n`));

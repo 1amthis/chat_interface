@@ -5,9 +5,9 @@
 import OpenAI from 'openai';
 import { ChatMessage, StreamChunk, ToolCallInfo, ToolExecutionResult } from '../types';
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse, ToolSource } from '@/types';
+import { toolCallLimitReached } from '../base';
 import { toOpenAITools, parseToolName } from '@/lib/mcp/tool-converter';
-import { hasToolBeenExecuted } from '../base';
-import { openAIWebSearchTool, openAIGoogleDriveTool, openAIMemorySearchTool, toResponsesAPIWebSearchTool, toResponsesAPIGoogleDriveTool, toResponsesAPIMemorySearchTool } from '../tools/definitions';
+import { openAIWebSearchTool, openAIGoogleDriveTool, openAIMemorySearchTool, openAIRAGSearchTool, toResponsesAPIWebSearchTool, toResponsesAPIGoogleDriveTool, toResponsesAPIMemorySearchTool, toResponsesAPIRAGSearchTool } from '../tools/definitions';
 import { toOpenAIContent } from './content';
 
 /**
@@ -24,7 +24,8 @@ export async function* streamOpenAI(
   driveSearchResults?: GoogleDriveSearchResponse,
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
-  toolExecutions?: ToolExecutionResult[]
+  toolExecutions?: ToolExecutionResult[],
+  ragEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('OpenAI API key is required');
 
@@ -97,16 +98,19 @@ export async function* streamOpenAI(
   }
 
   // Build tools array based on enabled features
-  // Don't include tools that have already been executed in this turn to prevent infinite loops
+  // Per-tool call limit prevents loops while allowing multiple calls with different queries
   const tools: OpenAI.ChatCompletionTool[] = [];
-  if (webSearchEnabled && !searchResults && !hasToolBeenExecuted('web_search', toolExecutions)) {
+  if (webSearchEnabled && !searchResults && !toolCallLimitReached('web_search', toolExecutions)) {
     tools.push(openAIWebSearchTool);
   }
-  if (googleDriveEnabled && !driveSearchResults && !hasToolBeenExecuted('google_drive_search', toolExecutions)) {
+  if (googleDriveEnabled && !driveSearchResults && !toolCallLimitReached('google_drive_search', toolExecutions)) {
     tools.push(openAIGoogleDriveTool);
   }
-  if (memorySearchEnabled && !hasToolBeenExecuted('memory_search', toolExecutions)) {
+  if (memorySearchEnabled && !toolCallLimitReached('memory_search', toolExecutions)) {
     tools.push(openAIMemorySearchTool);
+  }
+  if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
+    tools.push(openAIRAGSearchTool);
   }
   // Add MCP tools
   if (mcpTools && mcpTools.length > 0) {
@@ -210,6 +214,14 @@ export async function* streamOpenAI(
               params: { query: args.query },
               source: 'memory_search',
             });
+          } else if (tc.name === 'rag_search') {
+            parsedToolCalls.push({
+              id: tc.id,
+              name: tc.name,
+              originalName: tc.name,
+              params: { query: args.query },
+              source: 'rag_search',
+            });
           }
         } catch (e) {
           // Invalid tool call arguments - warn instead of silently dropping
@@ -265,7 +277,8 @@ function toResponsesAPITools(
   webSearchEnabled?: boolean,
   googleDriveEnabled?: boolean,
   memorySearchEnabled?: boolean,
-  mcpTools?: UnifiedTool[]
+  mcpTools?: UnifiedTool[],
+  ragEnabled?: boolean
 ): Record<string, unknown>[] {
   const tools: Record<string, unknown>[] = [];
 
@@ -282,6 +295,11 @@ function toResponsesAPITools(
   // Add memory search as a function tool
   if (memorySearchEnabled) {
     tools.push(toResponsesAPIMemorySearchTool());
+  }
+
+  // Add RAG search as a function tool
+  if (ragEnabled) {
+    tools.push(toResponsesAPIRAGSearchTool());
   }
 
   // Add MCP tools
@@ -317,7 +335,8 @@ export async function* streamOpenAIResponses(
   driveSearchResults?: GoogleDriveSearchResponse,
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
-  toolExecutions?: ToolExecutionResult[]
+  toolExecutions?: ToolExecutionResult[],
+  ragEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('OpenAI API key is required');
 
@@ -332,9 +351,10 @@ export async function* streamOpenAIResponses(
     // Build content parts for this message
     const contentParts: Record<string, unknown>[] = [];
 
-    // Add text content
+    // Add text content - use 'output_text' for assistant messages, 'input_text' for user messages
     if (msg.content) {
-      contentParts.push({ type: 'input_text', text: msg.content });
+      const textType = role === 'assistant' ? 'output_text' : 'input_text';
+      contentParts.push({ type: textType, text: msg.content });
     }
 
     // Handle file/image attachments
@@ -353,12 +373,12 @@ export async function* streamOpenAIResponses(
         try {
           const textContent = atob(attachment.data);
           contentParts.push({
-            type: 'input_text',
+            type: textType,
             text: `[File: ${attachment.name}]\n${textContent}`,
           });
         } catch {
           contentParts.push({
-            type: 'input_text',
+            type: textType,
             text: `[File: ${attachment.name}] (Unable to decode content)`,
           });
         }
@@ -410,13 +430,14 @@ export async function* streamOpenAIResponses(
     requestOptions.instructions = systemPrompt;
   }
 
-  // Add tools if enabled (and we don't already have results or tool executions)
-  // Don't include tools that have already been executed in this turn to prevent infinite loops
+  // Add tools if enabled
+  // Per-tool call limit prevents loops while allowing multiple calls with different queries
   const tools = toResponsesAPITools(
-    webSearchEnabled && !searchResults && !hasToolBeenExecuted('web_search', toolExecutions),
-    googleDriveEnabled && !driveSearchResults && !hasToolBeenExecuted('google_drive_search', toolExecutions),
-    memorySearchEnabled && !hasToolBeenExecuted('memory_search', toolExecutions),
-    mcpTools
+    webSearchEnabled && !searchResults && !toolCallLimitReached('web_search', toolExecutions),
+    googleDriveEnabled && !driveSearchResults && !toolCallLimitReached('google_drive_search', toolExecutions),
+    memorySearchEnabled && !toolCallLimitReached('memory_search', toolExecutions),
+    mcpTools,
+    ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)
   );
   if (tools.length > 0) {
     requestOptions.tools = tools;
@@ -528,6 +549,8 @@ export async function* streamOpenAIResponses(
             toolSource = 'google_drive';
           } else if (fc.name === 'memory_search') {
             toolSource = 'memory_search';
+          } else if (fc.name === 'rag_search') {
+            toolSource = 'rag_search';
           } else if (fc.name.startsWith('mcp__')) {
             // New __ delimiter format: mcp__serverId__toolName
             toolSource = 'mcp';
