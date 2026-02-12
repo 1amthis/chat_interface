@@ -1,4 +1,4 @@
-export type Provider = 'openai' | 'anthropic' | 'google' | 'ollama';
+export type Provider = 'openai' | 'anthropic' | 'google' | 'mistral';
 
 export interface Attachment {
   id: string;
@@ -153,7 +153,7 @@ export interface ChatSettings {
   anthropicThinkingEnabled?: boolean;
   anthropicThinkingBudgetTokens?: number;
   googleKey?: string;
-  ollamaUrl: string;
+  mistralKey?: string;
   systemPrompt?: string;
   theme: Theme;
   webSearchEnabled?: boolean;
@@ -202,22 +202,16 @@ export const DEFAULT_MODELS: Record<Provider, string[]> = {
     'gemini-2.0-flash',
     'gemini-2.0-flash-lite',
   ],
-  ollama: [
-    'llama3.3',
-    'llama3.2',
-    'llama3.1',
-    'qwen2.5',
-    'mistral',
-    'codellama',
-    'deepseek-coder-v2',
-    'phi3',
+  mistral: [
+    'mistral-large-latest',
+    'mistral-medium-latest',
+    'mistral-small-latest',
   ],
 };
 
 export const DEFAULT_SETTINGS: ChatSettings = {
   provider: 'openai',
   model: 'gpt-5',
-  ollamaUrl: 'http://localhost:11434',
   theme: 'system',
   anthropicThinkingEnabled: false,
   anthropicThinkingBudgetTokens: 1024,

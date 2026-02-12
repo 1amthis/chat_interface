@@ -2,7 +2,7 @@
  * Multi-provider chat streaming module
  *
  * This module provides a unified interface for streaming chat responses
- * from multiple AI providers (OpenAI, Anthropic, Google, Ollama).
+ * from multiple AI providers (OpenAI, Anthropic, Google, Mistral).
  */
 
 // Re-export types
@@ -54,7 +54,7 @@ export {
 import { streamOpenAI, streamOpenAIResponses } from './openai';
 import { streamAnthropic } from './anthropic';
 import { streamGoogle } from './google';
-import { streamOllama } from './ollama';
+import { streamMistral } from './mistral';
 import { isOpenAIReasoningModel } from './base';
 import { ChatMessage, StreamChunk, ToolExecutionResult } from './types';
 import { ChatSettings, UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
@@ -117,8 +117,20 @@ export async function* streamChat(
       toolExecutions,
       ragEnabled
     );
-  } else if (provider === 'ollama') {
-    // Ollama doesn't support tools directly, but memory search results can be passed via tool executions
-    yield* streamOllama(messages, model, settings.ollamaUrl, systemPrompt, searchResults, driveSearchResults, mcpTools, toolExecutions);
+  } else if (provider === 'mistral') {
+    yield* streamMistral(
+      messages,
+      model,
+      settings.mistralKey,
+      systemPrompt,
+      webSearchEnabled,
+      searchResults,
+      googleDriveEnabled,
+      driveSearchResults,
+      memorySearchEnabled,
+      mcpTools,
+      toolExecutions,
+      ragEnabled
+    );
   }
 }

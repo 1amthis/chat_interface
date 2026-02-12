@@ -539,7 +539,7 @@ export function Sidebar({
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
                   <option value="google">Google</option>
-                  <option value="ollama">Ollama</option>
+                  <option value="mistral">Mistral</option>
                 </select>
                 {editingProjectSettings.provider && (
                   <select

@@ -361,11 +361,8 @@ export function Chat() {
       );
 
       // Append artifact tool instructions (with list of existing artifacts)
-      // Only for providers that support tool calling (not Ollama)
       const allCurrentArtifacts = [...(conv.artifacts || []), ...streamingArtifactsRef.current];
-      const artifactPrompt = settings.provider !== 'ollama'
-        ? buildArtifactSystemPrompt(allCurrentArtifacts.length > 0 ? allCurrentArtifacts : undefined)
-        : undefined;
+      const artifactPrompt = buildArtifactSystemPrompt(allCurrentArtifacts.length > 0 ? allCurrentArtifacts : undefined);
       const mergedSystemPrompt = artifactPrompt
         ? (baseSystemPrompt ? `${baseSystemPrompt}\n\n${artifactPrompt}` : artifactPrompt)
         : baseSystemPrompt;
@@ -1260,7 +1257,7 @@ export function Chat() {
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
                   <option value="google">Google (Gemini)</option>
-                  <option value="ollama">Ollama</option>
+                  <option value="mistral">Mistral</option>
                 </select>
                 <select
                   value={settings.model}

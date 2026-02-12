@@ -121,7 +121,7 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
               <option value="google">Google (Gemini)</option>
-              <option value="ollama">Ollama (Local)</option>
+              <option value="mistral">Mistral AI</option>
             </select>
           </div>
 
@@ -230,14 +230,14 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
             </div>
           )}
 
-          {localSettings.provider === 'ollama' && (
+          {localSettings.provider === 'mistral' && (
             <div>
-              <label className="block text-sm font-medium mb-2">Ollama URL</label>
+              <label className="block text-sm font-medium mb-2">Mistral API Key</label>
               <input
-                type="text"
-                value={localSettings.ollamaUrl}
-                onChange={(e) => setLocalSettings({ ...localSettings, ollamaUrl: e.target.value })}
-                placeholder="http://localhost:11434"
+                type="password"
+                value={localSettings.mistralKey || ''}
+                onChange={(e) => setLocalSettings({ ...localSettings, mistralKey: e.target.value })}
+                placeholder="..."
                 className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
               />
             </div>
