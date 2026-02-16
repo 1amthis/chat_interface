@@ -176,6 +176,8 @@ export interface ChatSettings {
   ragChunkStrategy?: 'paragraph' | 'fixed' | 'sentence' | 'markdown';
   ragChunkSize?: number;    // 500–5000, default 2000
   ragChunkOverlap?: number; // 0–500, default 200
+  // Artifacts settings
+  artifactsEnabled?: boolean;
 }
 
 export const DEFAULT_MODELS: Record<Provider, string[]> = {
@@ -224,6 +226,7 @@ export const DEFAULT_SETTINGS: ChatSettings = {
   theme: 'system',
   anthropicThinkingEnabled: false,
   anthropicThinkingBudgetTokens: 1024,
+  artifactsEnabled: true,
 };
 
 export const PROJECT_COLORS = [

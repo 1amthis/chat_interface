@@ -75,16 +75,17 @@ export async function* streamChat(
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
-  ragEnabled?: boolean
+  ragEnabled?: boolean,
+  artifactsEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   const { provider, model } = settings;
 
   if (provider === 'openai') {
     // Use Responses API for reasoning-capable models (gpt-5 + o-series) to get reasoning summaries
     if (isOpenAIReasoningModel(model)) {
-      yield* streamOpenAIResponses(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions, ragEnabled);
+      yield* streamOpenAIResponses(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions, ragEnabled, artifactsEnabled);
     } else {
-      yield* streamOpenAI(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions, ragEnabled);
+      yield* streamOpenAI(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions, ragEnabled, artifactsEnabled);
     }
   } else if (provider === 'anthropic') {
     yield* streamAnthropic(
@@ -101,7 +102,8 @@ export async function* streamChat(
       toolExecutions,
       settings.anthropicThinkingEnabled,
       settings.anthropicThinkingBudgetTokens,
-      ragEnabled
+      ragEnabled,
+      artifactsEnabled
     );
   } else if (provider === 'google') {
     yield* streamGoogle(
@@ -116,7 +118,8 @@ export async function* streamChat(
       memorySearchEnabled,
       mcpTools,
       toolExecutions,
-      ragEnabled
+      ragEnabled,
+      artifactsEnabled
     );
   } else if (provider === 'mistral') {
     yield* streamMistral(
@@ -131,7 +134,8 @@ export async function* streamChat(
       memorySearchEnabled,
       mcpTools,
       toolExecutions,
-      ragEnabled
+      ragEnabled,
+      artifactsEnabled
     );
   } else if (provider === 'cerebras') {
     yield* streamCerebras(
@@ -146,7 +150,8 @@ export async function* streamChat(
       memorySearchEnabled,
       mcpTools,
       toolExecutions,
-      ragEnabled
+      ragEnabled,
+      artifactsEnabled
     );
   }
 }

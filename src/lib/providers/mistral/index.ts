@@ -31,7 +31,8 @@ export async function* streamMistral(
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
-  ragEnabled?: boolean
+  ragEnabled?: boolean,
+  artifactsEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Mistral API key is required');
 
@@ -101,7 +102,10 @@ export async function* streamMistral(
   if (mcpTools && mcpTools.length > 0) {
     tools.push(...toOpenAITools(mcpTools));
   }
-  tools.push(openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool);
+  // Artifact tools (enabled by default, can be toggled off)
+  if (artifactsEnabled !== false) {
+    tools.push(openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool);
+  }
   if (tools.length > 0) {
     requestOptions.tools = tools;
     requestOptions.tool_choice = 'auto';

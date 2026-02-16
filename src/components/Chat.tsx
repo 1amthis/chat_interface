@@ -378,9 +378,11 @@ export function Chat() {
         conv.systemPrompt
       );
 
-      // Append artifact tool instructions (with list of existing artifacts)
+      // Append artifact tool instructions (with list of existing artifacts) when artifacts are enabled
       const allCurrentArtifacts = [...(conv.artifacts || []), ...streamingArtifactsRef.current];
-      const artifactPrompt = buildArtifactSystemPrompt(allCurrentArtifacts.length > 0 ? allCurrentArtifacts : undefined);
+      const artifactPrompt = (settings.artifactsEnabled !== false)
+        ? buildArtifactSystemPrompt(allCurrentArtifacts.length > 0 ? allCurrentArtifacts : undefined)
+        : undefined;
       const mergedSystemPrompt = artifactPrompt
         ? (baseSystemPrompt ? `${baseSystemPrompt}\n\n${artifactPrompt}` : artifactPrompt)
         : baseSystemPrompt;
@@ -415,6 +417,7 @@ export function Chat() {
           driveSearchResults,
           memorySearchEnabled: settings.memorySearchEnabled,
           ragEnabled: settings.ragEnabled,
+          artifactsEnabled: settings.artifactsEnabled,
           toolExecutions,
         }),
         signal: combinedSignal,

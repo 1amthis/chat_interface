@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
       memorySearchEnabled,
       ragEnabled,
       toolExecutions,
+      artifactsEnabled,
     } = body as {
       messages: ChatMessage[];
       settings: ChatSettings;
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
       memorySearchEnabled?: boolean;
       ragEnabled?: boolean;
       toolExecutions?: ToolExecutionResult[];
+      artifactsEnabled?: boolean;
     };
 
     // Collect MCP and built-in tools if enabled
@@ -68,7 +70,8 @@ export async function POST(request: NextRequest) {
             memorySearchEnabled,
             mcpTools.length > 0 ? mcpTools : undefined,
             toolExecutions,
-            ragEnabled
+            ragEnabled,
+            artifactsEnabled
           )) {
             if (chunk.type === 'content') {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: chunk.content })}\n\n`));

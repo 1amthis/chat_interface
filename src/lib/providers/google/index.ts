@@ -25,7 +25,8 @@ export async function* streamGoogle(
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
-  ragEnabled?: boolean
+  ragEnabled?: boolean,
+  artifactsEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Google Gemini API key is required');
 
@@ -120,8 +121,10 @@ export async function* streamGoogle(
   if (mcpTools && mcpTools.length > 0) {
     functionDeclarations.push(...toGeminiTools(mcpTools).functionDeclarations);
   }
-  // Artifact tools are always available
-  functionDeclarations.push(geminiCreateArtifactDeclaration, geminiUpdateArtifactDeclaration, geminiReadArtifactDeclaration);
+  // Artifact tools (enabled by default, can be toggled off)
+  if (artifactsEnabled !== false) {
+    functionDeclarations.push(geminiCreateArtifactDeclaration, geminiUpdateArtifactDeclaration, geminiReadArtifactDeclaration);
+  }
 
   if (functionDeclarations.length > 0) {
     requestBody.tools = [{ functionDeclarations }];

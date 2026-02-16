@@ -26,7 +26,8 @@ export async function* streamOpenAI(
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
-  ragEnabled?: boolean
+  ragEnabled?: boolean,
+  artifactsEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('OpenAI API key is required');
 
@@ -117,8 +118,10 @@ export async function* streamOpenAI(
   if (mcpTools && mcpTools.length > 0) {
     tools.push(...toOpenAITools(mcpTools));
   }
-  // Artifact tools are always available (no settings toggle needed)
-  tools.push(openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool);
+  // Artifact tools (enabled by default, can be toggled off)
+  if (artifactsEnabled !== false) {
+    tools.push(openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool);
+  }
   if (tools.length > 0) {
     requestOptions.tools = tools;
     requestOptions.tool_choice = 'auto';
@@ -289,7 +292,8 @@ function toResponsesAPITools(
   googleDriveEnabled?: boolean,
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
-  ragEnabled?: boolean
+  ragEnabled?: boolean,
+  artifactsEnabled?: boolean
 ): Record<string, unknown>[] {
   const tools: Record<string, unknown>[] = [];
 
@@ -329,10 +333,12 @@ function toResponsesAPITools(
     }
   }
 
-  // Artifact tools are always available
-  tools.push(toResponsesAPICreateArtifactTool());
-  tools.push(toResponsesAPIUpdateArtifactTool());
-  tools.push(toResponsesAPIReadArtifactTool());
+  // Artifact tools (enabled by default, can be toggled off)
+  if (artifactsEnabled !== false) {
+    tools.push(toResponsesAPICreateArtifactTool());
+    tools.push(toResponsesAPIUpdateArtifactTool());
+    tools.push(toResponsesAPIReadArtifactTool());
+  }
 
   return tools;
 }
@@ -352,7 +358,8 @@ export async function* streamOpenAIResponses(
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
-  ragEnabled?: boolean
+  ragEnabled?: boolean,
+  artifactsEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('OpenAI API key is required');
 
@@ -453,7 +460,8 @@ export async function* streamOpenAIResponses(
     googleDriveEnabled && !driveSearchResults && !toolCallLimitReached('google_drive_search', toolExecutions),
     memorySearchEnabled && !toolCallLimitReached('memory_search', toolExecutions),
     mcpTools,
-    ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)
+    ragEnabled && !toolCallLimitReached('rag_search', toolExecutions),
+    artifactsEnabled
   );
   if (tools.length > 0) {
     requestOptions.tools = tools;

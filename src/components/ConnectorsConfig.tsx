@@ -268,6 +268,38 @@ export function ConnectorsConfig({ settings, onSettingsChange, onClose }: Connec
           </p>
         </section>
 
+        {/* Artifacts */}
+        <section className="p-4 rounded-xl border border-[var(--border-color)]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+              <div>
+                <label className="block text-sm font-medium">Artifacts</label>
+                <p className="text-xs text-gray-500">
+                  Allow the AI to create and manage rich content (code, HTML, React, SVG, diagrams)
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.artifactsEnabled !== false}
+              onClick={() => onSettingsChange({ artifactsEnabled: settings.artifactsEnabled === false ? true : false })}
+              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                settings.artifactsEnabled !== false ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  settings.artifactsEnabled !== false ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </section>
+
         {/* MCP Tools */}
         <section className="p-4 rounded-xl border border-[var(--border-color)]">
           <MCPSettingsSection

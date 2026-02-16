@@ -28,7 +28,8 @@ export async function* streamAnthropic(
   toolExecutions?: ToolExecutionResult[],
   thinkingEnabled?: boolean,
   thinkingBudgetTokens?: number,
-  ragEnabled?: boolean
+  ragEnabled?: boolean,
+  artifactsEnabled?: boolean
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Anthropic API key is required');
 
@@ -161,8 +162,10 @@ export async function* streamAnthropic(
   if (mcpTools && mcpTools.length > 0) {
     tools.push(...toAnthropicTools(mcpTools));
   }
-  // Artifact tools are always available
-  tools.push(anthropicCreateArtifactTool, anthropicUpdateArtifactTool, anthropicReadArtifactTool);
+  // Artifact tools (enabled by default, can be toggled off)
+  if (artifactsEnabled !== false) {
+    tools.push(anthropicCreateArtifactTool, anthropicUpdateArtifactTool, anthropicReadArtifactTool);
+  }
   if (tools.length > 0) {
     requestOptions.tools = tools;
   }
