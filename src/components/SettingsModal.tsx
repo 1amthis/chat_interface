@@ -122,6 +122,7 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
               <option value="anthropic">Anthropic</option>
               <option value="google">Google (Gemini)</option>
               <option value="mistral">Mistral AI</option>
+              <option value="cerebras">Cerebras</option>
             </select>
           </div>
 
@@ -238,6 +239,19 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
                 value={localSettings.mistralKey || ''}
                 onChange={(e) => setLocalSettings({ ...localSettings, mistralKey: e.target.value })}
                 placeholder="..."
+                className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
+              />
+            </div>
+          )}
+
+          {localSettings.provider === 'cerebras' && (
+            <div>
+              <label className="block text-sm font-medium mb-2">Cerebras API Key</label>
+              <input
+                type="password"
+                value={localSettings.cerebrasKey || ''}
+                onChange={(e) => setLocalSettings({ ...localSettings, cerebrasKey: e.target.value })}
+                placeholder="csk-..."
                 className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
               />
             </div>

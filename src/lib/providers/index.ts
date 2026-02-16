@@ -2,7 +2,7 @@
  * Multi-provider chat streaming module
  *
  * This module provides a unified interface for streaming chat responses
- * from multiple AI providers (OpenAI, Anthropic, Google, Mistral).
+ * from multiple AI providers (OpenAI, Anthropic, Google, Mistral, Cerebras).
  */
 
 // Re-export types
@@ -55,6 +55,7 @@ import { streamOpenAI, streamOpenAIResponses } from './openai';
 import { streamAnthropic } from './anthropic';
 import { streamGoogle } from './google';
 import { streamMistral } from './mistral';
+import { streamCerebras } from './cerebras';
 import { isOpenAIReasoningModel } from './base';
 import { ChatMessage, StreamChunk, ToolExecutionResult } from './types';
 import { ChatSettings, UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
@@ -122,6 +123,21 @@ export async function* streamChat(
       messages,
       model,
       settings.mistralKey,
+      systemPrompt,
+      webSearchEnabled,
+      searchResults,
+      googleDriveEnabled,
+      driveSearchResults,
+      memorySearchEnabled,
+      mcpTools,
+      toolExecutions,
+      ragEnabled
+    );
+  } else if (provider === 'cerebras') {
+    yield* streamCerebras(
+      messages,
+      model,
+      settings.cerebrasKey,
       systemPrompt,
       webSearchEnabled,
       searchResults,

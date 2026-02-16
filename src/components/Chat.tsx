@@ -1258,6 +1258,7 @@ export function Chat() {
                   <option value="anthropic">Anthropic</option>
                   <option value="google">Google (Gemini)</option>
                   <option value="mistral">Mistral</option>
+                  <option value="cerebras">Cerebras</option>
                 </select>
                 <select
                   value={settings.model}

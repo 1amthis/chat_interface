@@ -1,4 +1,4 @@
-export type Provider = 'openai' | 'anthropic' | 'google' | 'mistral';
+export type Provider = 'openai' | 'anthropic' | 'google' | 'mistral' | 'cerebras';
 
 export interface Attachment {
   id: string;
@@ -154,6 +154,7 @@ export interface ChatSettings {
   anthropicThinkingBudgetTokens?: number;
   googleKey?: string;
   mistralKey?: string;
+  cerebrasKey?: string;
   systemPrompt?: string;
   theme: Theme;
   webSearchEnabled?: boolean;
@@ -206,6 +207,14 @@ export const DEFAULT_MODELS: Record<Provider, string[]> = {
     'mistral-large-latest',
     'mistral-medium-latest',
     'mistral-small-latest',
+  ],
+  cerebras: [
+    'llama-3.3-70b',
+    'qwen-3-32b',
+    'llama3.1-8b',
+    'qwen-3-235b-a22b-instruct-2507',
+    'gpt-oss-120b',
+    'zai-glm-4.7',
   ],
 };
 

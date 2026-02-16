@@ -540,6 +540,7 @@ export function Sidebar({
                   <option value="anthropic">Anthropic</option>
                   <option value="google">Google</option>
                   <option value="mistral">Mistral</option>
+                  <option value="cerebras">Cerebras</option>
                 </select>
                 {editingProjectSettings.provider && (
                   <select
