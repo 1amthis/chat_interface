@@ -24,6 +24,7 @@ interface SidebarProps {
   onMoveToProject: (conversationId: string, projectId: string | undefined) => void;
   onOpenKnowledgeBase: () => void;
   onOpenModelsConfig: () => void;
+  onOpenConnectorsConfig: () => void;
 }
 
 export function Sidebar({
@@ -46,6 +47,7 @@ export function Sidebar({
   onMoveToProject,
   onOpenKnowledgeBase,
   onOpenModelsConfig,
+  onOpenConnectorsConfig,
 }: SidebarProps) {
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -699,6 +701,15 @@ export function Sidebar({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
           </svg>
           Models
+        </button>
+        <button
+          onClick={onOpenConnectorsConfig}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border-color)] transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+          </svg>
+          Connectors
         </button>
         <button
           onClick={onOpenSettings}

@@ -25,6 +25,7 @@ import { ThinkingIndicator } from './ThinkingIndicator';
 import { ProjectDashboard } from './ProjectDashboard';
 import { KnowledgeBase } from './KnowledgeBase';
 import { ModelsConfig } from './ModelsConfig';
+import { ConnectorsConfig } from './ConnectorsConfig';
 import { ArtifactPanel } from './ArtifactPanel';
 import { useTheme } from './ThemeProvider';
 import {
@@ -45,6 +46,7 @@ export function Chat() {
   const [showSettings, setShowSettings] = useState(false);
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   const [showModelsConfig, setShowModelsConfig] = useState(false);
+  const [showConnectorsConfig, setShowConnectorsConfig] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [lastUsage, setLastUsage] = useState<TokenUsage | null>(null);
   const [sessionUsage, setSessionUsage] = useState<TokenUsage>({
@@ -157,6 +159,7 @@ export function Chat() {
     setCurrentConversation(null);
     setShowKnowledgeBase(false);
     setShowModelsConfig(false);
+    setShowConnectorsConfig(false);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -185,6 +188,7 @@ export function Chat() {
     setCurrentConversation(newConversation);
     setShowKnowledgeBase(false);
     setShowModelsConfig(false);
+    setShowConnectorsConfig(false);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -198,6 +202,7 @@ export function Chat() {
       setCurrentConversation(conv);
       setShowKnowledgeBase(false);
       setShowModelsConfig(false);
+      setShowConnectorsConfig(false);
       setStreamingContent('');
       setLastUsage(null);
       setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -267,6 +272,7 @@ export function Chat() {
     setCurrentConversation(null);
     setShowKnowledgeBase(false);
     setShowModelsConfig(false);
+    setShowConnectorsConfig(false);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -1230,11 +1236,20 @@ export function Chat() {
         onOpenKnowledgeBase={() => {
           setShowKnowledgeBase(true);
           setShowModelsConfig(false);
+          setShowConnectorsConfig(false);
           setCurrentConversation(null);
           setCurrentProjectId(null);
         }}
         onOpenModelsConfig={() => {
           setShowModelsConfig(true);
+          setShowKnowledgeBase(false);
+          setShowConnectorsConfig(false);
+          setCurrentConversation(null);
+          setCurrentProjectId(null);
+        }}
+        onOpenConnectorsConfig={() => {
+          setShowConnectorsConfig(true);
+          setShowModelsConfig(false);
           setShowKnowledgeBase(false);
           setCurrentConversation(null);
           setCurrentProjectId(null);
@@ -1250,6 +1265,8 @@ export function Chat() {
             <h1 className="font-medium">
               {showModelsConfig
                 ? 'Models & Providers'
+                : showConnectorsConfig
+                ? 'Connectors'
                 : showKnowledgeBase
                 ? 'Knowledge Base'
                 : currentProjectId
@@ -1273,7 +1290,7 @@ export function Chat() {
               </span>
             )}
           </div>
-          {!currentProjectId && !showKnowledgeBase && !showModelsConfig && (
+          {!currentProjectId && !showKnowledgeBase && !showModelsConfig && !showConnectorsConfig && (
             <div className="flex items-center gap-4">
               <TokenUsageDisplay usage={lastUsage} sessionUsage={sessionUsage} />
               <div className="flex items-center gap-2">
@@ -1313,6 +1330,15 @@ export function Chat() {
                 handleSaveSettings(newSettings);
               }}
               onClose={() => setShowModelsConfig(false)}
+            />
+          ) : showConnectorsConfig ? (
+            <ConnectorsConfig
+              settings={settings}
+              onSettingsChange={(partial) => {
+                const newSettings = { ...settings, ...partial };
+                handleSaveSettings(newSettings);
+              }}
+              onClose={() => setShowConnectorsConfig(false)}
             />
           ) : showKnowledgeBase ? (
             <KnowledgeBase
@@ -1390,7 +1416,7 @@ export function Chat() {
           <div ref={messagesEndRef} />
         </main>
 
-        {!currentProjectId && !showKnowledgeBase && !showModelsConfig && (
+        {!currentProjectId && !showKnowledgeBase && !showModelsConfig && !showConnectorsConfig && (
           <div className="relative">
             {/* Scroll to bottom button */}
             {showScrollToBottom && (
