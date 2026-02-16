@@ -170,6 +170,18 @@ export async function rebuildIndex(conversations: Conversation[]): Promise<void>
 }
 
 /**
+ * Clear the entire memory search index
+ */
+export async function clearMemoryIndex(): Promise<void> {
+  try {
+    await clearIndex();
+  } catch (error) {
+    console.error('Failed to clear memory index:', error);
+    throw error;
+  }
+}
+
+/**
  * Get index statistics for UI display
  */
 export async function getIndexStats(): Promise<IndexStats> {

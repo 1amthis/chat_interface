@@ -23,6 +23,7 @@ import { SettingsModal } from './SettingsModal';
 import { TokenUsageDisplay } from './TokenUsageDisplay';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ProjectDashboard } from './ProjectDashboard';
+import { KnowledgeBase } from './KnowledgeBase';
 import { ArtifactPanel } from './ArtifactPanel';
 import { useTheme } from './ThemeProvider';
 import {
@@ -41,6 +42,7 @@ export function Chat() {
   const [settings, setSettings] = useState<ChatSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [lastUsage, setLastUsage] = useState<TokenUsage | null>(null);
   const [sessionUsage, setSessionUsage] = useState<TokenUsage>({
@@ -151,6 +153,7 @@ export function Chat() {
   const handleNewChat = useCallback(() => {
     setCurrentProjectId(null);
     setCurrentConversation(null);
+    setShowKnowledgeBase(false);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -177,6 +180,7 @@ export function Chat() {
 
     setCurrentProjectId(null);
     setCurrentConversation(newConversation);
+    setShowKnowledgeBase(false);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -188,6 +192,7 @@ export function Chat() {
     if (conv) {
       setCurrentProjectId(null);
       setCurrentConversation(conv);
+      setShowKnowledgeBase(false);
       setStreamingContent('');
       setLastUsage(null);
       setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -255,6 +260,7 @@ export function Chat() {
   const handleSelectProject = useCallback((projectId: string) => {
     setCurrentProjectId(projectId);
     setCurrentConversation(null);
+    setShowKnowledgeBase(false);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -1215,6 +1221,11 @@ export function Chat() {
         onUpdateProjectFiles={handleUpdateProjectFiles}
         onUpdateProjectProviderModel={handleUpdateProjectProviderModel}
         onMoveToProject={handleMoveToProject}
+        onOpenKnowledgeBase={() => {
+          setShowKnowledgeBase(true);
+          setCurrentConversation(null);
+          setCurrentProjectId(null);
+        }}
       />
 
       <div
@@ -1224,7 +1235,9 @@ export function Chat() {
         <header className="h-14 border-b border-[var(--border-color)] flex items-center justify-between px-4">
           <div className="flex items-center gap-2">
             <h1 className="font-medium">
-              {currentProjectId
+              {showKnowledgeBase
+                ? 'Knowledge Base'
+                : currentProjectId
                 ? projects.find(p => p.id === currentProjectId)?.name || 'Project'
                 : (currentConversation?.title || 'New chat')}
             </h1>
@@ -1245,7 +1258,7 @@ export function Chat() {
               </span>
             )}
           </div>
-          {!currentProjectId && (
+          {!currentProjectId && !showKnowledgeBase && (
             <div className="flex items-center gap-4">
               <TokenUsageDisplay usage={lastUsage} sessionUsage={sessionUsage} />
               <div className="flex items-center gap-2">
@@ -1277,7 +1290,17 @@ export function Chat() {
         </header>
 
         <main ref={mainRef} className="flex-1 overflow-y-auto relative">
-          {currentProjectId ? (
+          {showKnowledgeBase ? (
+            <KnowledgeBase
+              conversations={conversations}
+              settings={settings}
+              onSettingsChange={(partial) => {
+                const newSettings = { ...settings, ...partial };
+                handleSaveSettings(newSettings);
+              }}
+              onClose={() => setShowKnowledgeBase(false)}
+            />
+          ) : currentProjectId ? (
             <ProjectDashboard
               project={projects.find(p => p.id === currentProjectId)!}
               conversations={conversations.filter(c => c.projectId === currentProjectId)}
@@ -1343,7 +1366,7 @@ export function Chat() {
           <div ref={messagesEndRef} />
         </main>
 
-        {!currentProjectId && (
+        {!currentProjectId && !showKnowledgeBase && (
           <div className="relative">
             {/* Scroll to bottom button */}
             {showScrollToBottom && (

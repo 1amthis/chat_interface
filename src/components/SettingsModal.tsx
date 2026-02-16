@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { ChatSettings, Provider, DEFAULT_MODELS, MCPServerConfig, BuiltinToolsConfig } from '@/types';
 import { getGoogleAuthUrl, isGoogleDriveConfigured } from '@/lib/googledrive';
 import { MCPSettingsSection } from './MCPSettingsSection';
-import { RAGSettingsSection } from './RAGSettingsSection';
 
 interface SettingsModalProps {
   settings: ChatSettings;
@@ -425,14 +424,9 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
                 />
               </button>
             </div>
-            {localSettings.memorySearchEnabled && (
-              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  The AI can search through your previous conversations to find relevant context when answering questions.
-                  Conversations are indexed locally using IndexedDB.
-                </p>
-              </div>
-            )}
+            <p className="text-xs text-gray-500">
+              Manage index and test search in the Knowledge Base view.
+            </p>
           </div>
 
           {/* RAG Document Search Section */}
@@ -460,17 +454,9 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
                 />
               </button>
             </div>
-            {localSettings.ragEnabled && (
-              <RAGSettingsSection
-                openaiKey={localSettings.openaiKey}
-                chunkStrategy={localSettings.ragChunkStrategy}
-                chunkSize={localSettings.ragChunkSize}
-                chunkOverlap={localSettings.ragChunkOverlap}
-                onChunkSettingsChange={(settings) =>
-                  setLocalSettings({ ...localSettings, ...settings })
-                }
-              />
-            )}
+            <p className="text-xs text-gray-500">
+              Upload and manage documents in the Knowledge Base view.
+            </p>
           </div>
 
           {/* MCP Tools Section */}
