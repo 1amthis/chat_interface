@@ -3,13 +3,17 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import { useTheme } from '@/components/ThemeProvider';
 
 interface MarkdownPreviewProps {
   content: string;
 }
 
 export function MarkdownPreview({ content }: MarkdownPreviewProps) {
+  const { resolvedTheme } = useTheme();
+  const syntaxTheme = resolvedTheme === 'dark' ? oneDark : oneLight;
+
   return (
     <div className="h-full overflow-auto p-4 prose prose-sm dark:prose-invert max-w-none">
       <ReactMarkdown
@@ -29,7 +33,7 @@ export function MarkdownPreview({ content }: MarkdownPreviewProps) {
 
             return (
               <SyntaxHighlighter
-                style={oneDark}
+                style={syntaxTheme}
                 language={match ? match[1] : 'text'}
                 PreTag="div"
                 customStyle={{
@@ -41,6 +45,9 @@ export function MarkdownPreview({ content }: MarkdownPreviewProps) {
                 {String(children).replace(/\n$/, '')}
               </SyntaxHighlighter>
             );
+          },
+          pre({ children }) {
+            return <>{children}</>;
           },
         }}
       >

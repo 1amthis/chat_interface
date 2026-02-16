@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import { useTheme } from '@/components/ThemeProvider';
 
 interface CodePreviewProps {
   content: string;
@@ -11,6 +12,8 @@ interface CodePreviewProps {
 
 export function CodePreview({ content, language = 'text' }: CodePreviewProps) {
   const [copied, setCopied] = useState(false);
+  const { resolvedTheme } = useTheme();
+  const syntaxTheme = resolvedTheme === 'dark' ? oneDark : oneLight;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -23,7 +26,7 @@ export function CodePreview({ content, language = 'text' }: CodePreviewProps) {
       <div className="absolute top-2 right-2 z-10">
         <button
           onClick={handleCopy}
-          className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+          className="px-3 py-1.5 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white rounded transition-colors"
         >
           {copied ? 'Copied!' : 'Copy'}
         </button>
@@ -31,7 +34,7 @@ export function CodePreview({ content, language = 'text' }: CodePreviewProps) {
       <div className="flex-1 overflow-auto">
         <SyntaxHighlighter
           language={language}
-          style={oneDark}
+          style={syntaxTheme}
           customStyle={{
             margin: 0,
             padding: '1rem',
