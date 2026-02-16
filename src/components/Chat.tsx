@@ -24,6 +24,7 @@ import { TokenUsageDisplay } from './TokenUsageDisplay';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ProjectDashboard } from './ProjectDashboard';
 import { KnowledgeBase } from './KnowledgeBase';
+import { ModelsConfig } from './ModelsConfig';
 import { ArtifactPanel } from './ArtifactPanel';
 import { useTheme } from './ThemeProvider';
 import {
@@ -43,6 +44,7 @@ export function Chat() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
+  const [showModelsConfig, setShowModelsConfig] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [lastUsage, setLastUsage] = useState<TokenUsage | null>(null);
   const [sessionUsage, setSessionUsage] = useState<TokenUsage>({
@@ -154,6 +156,7 @@ export function Chat() {
     setCurrentProjectId(null);
     setCurrentConversation(null);
     setShowKnowledgeBase(false);
+    setShowModelsConfig(false);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -181,6 +184,7 @@ export function Chat() {
     setCurrentProjectId(null);
     setCurrentConversation(newConversation);
     setShowKnowledgeBase(false);
+    setShowModelsConfig(false);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -193,6 +197,7 @@ export function Chat() {
       setCurrentProjectId(null);
       setCurrentConversation(conv);
       setShowKnowledgeBase(false);
+      setShowModelsConfig(false);
       setStreamingContent('');
       setLastUsage(null);
       setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -261,6 +266,7 @@ export function Chat() {
     setCurrentProjectId(projectId);
     setCurrentConversation(null);
     setShowKnowledgeBase(false);
+    setShowModelsConfig(false);
     setStreamingContent('');
     setLastUsage(null);
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -1223,6 +1229,13 @@ export function Chat() {
         onMoveToProject={handleMoveToProject}
         onOpenKnowledgeBase={() => {
           setShowKnowledgeBase(true);
+          setShowModelsConfig(false);
+          setCurrentConversation(null);
+          setCurrentProjectId(null);
+        }}
+        onOpenModelsConfig={() => {
+          setShowModelsConfig(true);
+          setShowKnowledgeBase(false);
           setCurrentConversation(null);
           setCurrentProjectId(null);
         }}
@@ -1235,7 +1248,9 @@ export function Chat() {
         <header className="h-14 border-b border-[var(--border-color)] flex items-center justify-between px-4">
           <div className="flex items-center gap-2">
             <h1 className="font-medium">
-              {showKnowledgeBase
+              {showModelsConfig
+                ? 'Models & Providers'
+                : showKnowledgeBase
                 ? 'Knowledge Base'
                 : currentProjectId
                 ? projects.find(p => p.id === currentProjectId)?.name || 'Project'
@@ -1258,7 +1273,7 @@ export function Chat() {
               </span>
             )}
           </div>
-          {!currentProjectId && !showKnowledgeBase && (
+          {!currentProjectId && !showKnowledgeBase && !showModelsConfig && (
             <div className="flex items-center gap-4">
               <TokenUsageDisplay usage={lastUsage} sessionUsage={sessionUsage} />
               <div className="flex items-center gap-2">
@@ -1290,7 +1305,16 @@ export function Chat() {
         </header>
 
         <main ref={mainRef} className="flex-1 overflow-y-auto relative">
-          {showKnowledgeBase ? (
+          {showModelsConfig ? (
+            <ModelsConfig
+              settings={settings}
+              onSettingsChange={(partial) => {
+                const newSettings = { ...settings, ...partial };
+                handleSaveSettings(newSettings);
+              }}
+              onClose={() => setShowModelsConfig(false)}
+            />
+          ) : showKnowledgeBase ? (
             <KnowledgeBase
               conversations={conversations}
               settings={settings}
@@ -1366,7 +1390,7 @@ export function Chat() {
           <div ref={messagesEndRef} />
         </main>
 
-        {!currentProjectId && !showKnowledgeBase && (
+        {!currentProjectId && !showKnowledgeBase && !showModelsConfig && (
           <div className="relative">
             {/* Scroll to bottom button */}
             {showScrollToBottom && (

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ChatSettings, Provider, DEFAULT_MODELS, MCPServerConfig, BuiltinToolsConfig } from '@/types';
+import { ChatSettings, MCPServerConfig, BuiltinToolsConfig } from '@/types';
 import { getGoogleAuthUrl, isGoogleDriveConfigured } from '@/lib/googledrive';
 import { MCPSettingsSection } from './MCPSettingsSection';
 
@@ -32,14 +32,6 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
       googleDriveAccessToken: undefined,
       googleDriveRefreshToken: undefined,
       googleDriveTokenExpiry: undefined,
-    });
-  };
-
-  const handleProviderChange = (provider: Provider) => {
-    setLocalSettings({
-      ...localSettings,
-      provider,
-      model: DEFAULT_MODELS[provider][0],
     });
   };
 
@@ -110,151 +102,12 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2">Provider</label>
-            <select
-              value={localSettings.provider}
-              onChange={(e) => handleProviderChange(e.target.value as Provider)}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
-            >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="google">Google (Gemini)</option>
-              <option value="mistral">Mistral AI</option>
-              <option value="cerebras">Cerebras</option>
-            </select>
+          {/* Provider/Model/Keys note */}
+          <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+            <p className="text-sm text-blue-700 dark:text-blue-300">
+              Manage providers, API keys, and model settings in the <strong>Models</strong> view (sidebar).
+            </p>
           </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Model</label>
-            <select
-              value={localSettings.model}
-              onChange={(e) => setLocalSettings({ ...localSettings, model: e.target.value })}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
-            >
-              {DEFAULT_MODELS[localSettings.provider].map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {localSettings.provider === 'openai' && (
-            <div>
-              <label className="block text-sm font-medium mb-2">OpenAI API Key</label>
-              <input
-                type="password"
-                value={localSettings.openaiKey || ''}
-                onChange={(e) => setLocalSettings({ ...localSettings, openaiKey: e.target.value })}
-                placeholder="sk-..."
-                className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
-              />
-            </div>
-          )}
-
-          {localSettings.provider === 'anthropic' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium mb-2">Anthropic API Key</label>
-                <input
-                  type="password"
-                  value={localSettings.anthropicKey || ''}
-                  onChange={(e) => setLocalSettings({ ...localSettings, anthropicKey: e.target.value })}
-                  placeholder="sk-ant-..."
-                  className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
-                />
-              </div>
-
-              <div className="border-t border-[var(--border-color)] pt-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <label className="block text-sm font-medium">Extended Thinking</label>
-                    <p className="text-xs text-gray-500">
-                      Show Claude thinking blocks (uses extra tokens)
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setLocalSettings({
-                      ...localSettings,
-                      anthropicThinkingEnabled: !localSettings.anthropicThinkingEnabled,
-                      anthropicThinkingBudgetTokens: localSettings.anthropicThinkingBudgetTokens || 1024,
-                    })}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      localSettings.anthropicThinkingEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        localSettings.anthropicThinkingEnabled ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {localSettings.anthropicThinkingEnabled && (
-                  <div className="space-y-2">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Thinking Budget (tokens)</label>
-                      <input
-                        type="number"
-                        min={1024}
-                        step={256}
-                        value={localSettings.anthropicThinkingBudgetTokens || 1024}
-                        onChange={(e) => setLocalSettings({
-                          ...localSettings,
-                          anthropicThinkingBudgetTokens: Number(e.target.value) || 1024,
-                        })}
-                        className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Must be ≥ 1024 and &lt; max tokens.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {localSettings.provider === 'google' && (
-            <div>
-              <label className="block text-sm font-medium mb-2">Google Gemini API Key</label>
-              <input
-                type="password"
-                value={localSettings.googleKey || ''}
-                onChange={(e) => setLocalSettings({ ...localSettings, googleKey: e.target.value })}
-                placeholder="AIza..."
-                className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
-              />
-            </div>
-          )}
-
-          {localSettings.provider === 'mistral' && (
-            <div>
-              <label className="block text-sm font-medium mb-2">Mistral API Key</label>
-              <input
-                type="password"
-                value={localSettings.mistralKey || ''}
-                onChange={(e) => setLocalSettings({ ...localSettings, mistralKey: e.target.value })}
-                placeholder="..."
-                className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
-              />
-            </div>
-          )}
-
-          {localSettings.provider === 'cerebras' && (
-            <div>
-              <label className="block text-sm font-medium mb-2">Cerebras API Key</label>
-              <input
-                type="password"
-                value={localSettings.cerebrasKey || ''}
-                onChange={(e) => setLocalSettings({ ...localSettings, cerebrasKey: e.target.value })}
-                placeholder="csk-..."
-                className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)]"
-              />
-            </div>
-          )}
 
           <div>
             <label className="block text-sm font-medium mb-2">System Prompt</label>
