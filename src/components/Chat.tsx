@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Message, Conversation, ChatSettings, DEFAULT_SETTINGS, DEFAULT_MODELS, Provider, Attachment, TokenUsage, Project, WebSearchResponse, GoogleDriveSearchResponse, ToolCall, ToolSource, ContentBlock, Artifact, ArtifactContentBlock, ReasoningContentBlock } from '@/types';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Message, Conversation, ChatSettings, DEFAULT_SETTINGS, DEFAULT_MODELS, Provider, Attachment, TokenUsage, Project, WebSearchResponse, GoogleDriveSearchResponse, ToolCall, ToolSource, ContentBlock, Artifact, ArtifactContentBlock, ReasoningContentBlock, ContextBreakdown } from '@/types';
 import type { ToolExecutionResult } from '@/lib/providers';
 import {
   getConversations,
@@ -15,6 +15,7 @@ import {
   addUsageRecord,
 } from '@/lib/storage';
 import { mergeSystemPrompts, buildArtifactSystemPrompt, isArtifactTool } from '@/lib/providers';
+import { getActivePath, getSiblings, getDefaultLeaf, ensureTreeStructure } from '@/lib/conversation-tree';
 import { processStreamingChunk } from '@/lib/artifact-parser';
 import { MAX_TOOL_RECURSION_DEPTH } from '@/lib/constants';
 import { Sidebar } from './Sidebar';
@@ -28,6 +29,7 @@ import { KnowledgeBase } from './KnowledgeBase';
 import { ModelsConfig } from './ModelsConfig';
 import { ConnectorsConfig } from './ConnectorsConfig';
 import { ArtifactPanel } from './ArtifactPanel';
+import { ContextInspector } from './ContextInspector';
 import { useTheme } from './ThemeProvider';
 import {
   useArtifacts,
@@ -57,6 +59,8 @@ export function Chat() {
   });
   const [currentToolCalls, setCurrentToolCalls] = useState<ToolCall[]>([]);
   const [streamingContentBlocks, setStreamingContentBlocks] = useState<ContentBlock[]>([]);
+  const [contextBreakdown, setContextBreakdown] = useState<ContextBreakdown | null>(null);
+  const [showContextInspector, setShowContextInspector] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingMessageRef = useRef<HTMLDivElement>(null);
   const { setTheme } = useTheme();
@@ -118,6 +122,22 @@ export function Chat() {
     settings,
     setSettings,
   });
+
+  // Computed: active branch path for display and API calls
+  const displayMessages = useMemo(() => {
+    if (!currentConversation) return [];
+    return getActivePath(currentConversation.messages, currentConversation.activeLeafId);
+  }, [currentConversation]);
+
+  // Computed: branch info for each displayed message (siblings count/index)
+  const branchInfoMap = useMemo(() => {
+    if (!currentConversation) return new Map<string, { siblings: Message[]; index: number }>();
+    const map = new Map<string, { siblings: Message[]; index: number }>();
+    for (const msg of displayMessages) {
+      map.set(msg.id, getSiblings(currentConversation.messages, msg.id));
+    }
+    return map;
+  }, [currentConversation, displayMessages]);
 
   useEffect(() => {
     setConversations(getConversations());
@@ -294,6 +314,12 @@ export function Chat() {
     accumulatedContentBlocks?: ContentBlock[],
     recursionDepth: number = 0
   ): Promise<void> => {
+    // Compute parent ID for the assistant message from the active path
+    const activePathForStream = getActivePath(conv.messages, conv.activeLeafId);
+    const parentForAssistant = activePathForStream.length > 0
+      ? activePathForStream[activePathForStream.length - 1].id
+      : null;
+
     // Prevent infinite tool call loops
     if (recursionDepth >= MAX_TOOL_RECURSION_DEPTH) {
       console.warn(`Tool call limit reached (${MAX_TOOL_RECURSION_DEPTH} calls). Stopping to prevent infinite loop.`);
@@ -312,6 +338,9 @@ export function Chat() {
 
       const limitToolCalls = existingToolCalls ? [...existingToolCalls] : [];
 
+      const limitProject = conv.projectId
+        ? projects.find(p => p.id === conv.projectId)
+        : undefined;
       const assistantMessage: Message = {
         id: generateId(),
         role: 'assistant',
@@ -319,6 +348,8 @@ export function Chat() {
         contentBlocks: limitBlocks.length > 0 ? limitBlocks : undefined,
         toolCalls: limitToolCalls.length > 0 ? limitToolCalls : undefined,
         timestamp: Date.now(),
+        model: limitProject?.model || settings.model,
+        parentId: parentForAssistant,
       };
 
       const existingArtifacts = conv.artifacts || [];
@@ -328,6 +359,7 @@ export function Chat() {
         ...conv,
         messages: [...conv.messages, assistantMessage],
         artifacts: allArtifacts.length > 0 ? allArtifacts : undefined,
+        activeLeafId: assistantMessage.id,
         updatedAt: Date.now(),
       };
 
@@ -362,6 +394,15 @@ export function Chat() {
     const toolCallsAccumulator: ToolCall[] = existingToolCalls ? [...existingToolCalls] : [];
     setCurrentToolCalls(toolCallsAccumulator);
 
+    // Track per-message usage and context breakdown (outside try for catch access)
+    let capturedUsage: TokenUsage | null = null;
+    let capturedBreakdown: ContextBreakdown | null = null;
+
+    // Find project for this conversation (outside try for catch access)
+    const currentProject = conv.projectId
+      ? projects.find(p => p.id === conv.projectId)
+      : undefined;
+
     try {
       abortControllerRef.current = new AbortController();
       // Combine user abort with a 5-minute streaming timeout
@@ -370,11 +411,6 @@ export function Chat() {
         abortControllerRef.current.signal,
         timeoutSignal,
       ]);
-
-      // Find project for this conversation
-      const currentProject = conv.projectId
-        ? projects.find(p => p.id === conv.projectId)
-        : undefined;
 
       // Merge system prompts: global + project + conversation
       const baseSystemPrompt = mergeSystemPrompts(
@@ -392,8 +428,8 @@ export function Chat() {
         ? (baseSystemPrompt ? `${baseSystemPrompt}\n\n${artifactPrompt}` : artifactPrompt)
         : baseSystemPrompt;
 
-      // Add project files to first user message
-      const messagesWithProjectFiles = conv.messages.map((m, idx) => {
+      // Use active path (not all messages) for the API request
+      const messagesWithProjectFiles = activePathForStream.map((m, idx) => {
         if (idx === 0 && m.role === 'user' && currentProject?.files) {
           return {
             role: m.role,
@@ -533,8 +569,13 @@ export function Chat() {
               ];
               setStreamingContentBlocks(displayBlocks);
             }
+            if (parsed.context_breakdown) {
+              capturedBreakdown = parsed.context_breakdown as ContextBreakdown;
+              setContextBreakdown(capturedBreakdown);
+            }
             if (parsed.usage) {
               const usage = parsed.usage as TokenUsage;
+              capturedUsage = usage;
               setLastUsage(usage);
               setSessionUsage((prev) => ({
                 inputTokens: prev.inputTokens + usage.inputTokens,
@@ -544,9 +585,6 @@ export function Chat() {
                 reasoningTokens: (prev.reasoningTokens || 0) + (usage.reasoningTokens || 0) || undefined,
               }));
               // Record usage for cost tracking
-              const currentProject = conv.projectId
-                ? projects.find(p => p.id === conv.projectId)
-                : undefined;
               addUsageRecord({
                 provider: (currentProject?.provider || settings.provider) as Provider,
                 model: currentProject?.model || settings.model,
@@ -1041,6 +1079,10 @@ export function Chat() {
         contentBlocks: contentBlocksAccumulator.length > 0 ? contentBlocksAccumulator : undefined,
         toolCalls: toolCallsAccumulator.length > 0 ? toolCallsAccumulator : undefined,
         timestamp: Date.now(),
+        usage: capturedUsage || undefined,
+        model: currentProject?.model || settings.model,
+        contextBreakdown: capturedBreakdown || undefined,
+        parentId: parentForAssistant,
       };
 
       // Merge any new artifacts with existing ones
@@ -1051,6 +1093,7 @@ export function Chat() {
         ...conv,
         messages: [...conv.messages, assistantMessage],
         artifacts: allArtifacts.length > 0 ? allArtifacts : undefined,
+        activeLeafId: assistantMessage.id,
         updatedAt: Date.now(),
       };
 
@@ -1076,10 +1119,15 @@ export function Chat() {
                   contentBlocks: currentBlocks.length > 0 ? currentBlocks : undefined,
                   toolCalls: currentTools.length > 0 ? currentTools : undefined,
                   timestamp: Date.now(),
+                  usage: capturedUsage || undefined,
+                  model: currentProject?.model || settings.model,
+                  contextBreakdown: capturedBreakdown || undefined,
+                  parentId: parentForAssistant,
                 };
                 const updatedConv: Conversation = {
                   ...conv,
                   messages: [...conv.messages, assistantMessage],
+                  activeLeafId: assistantMessage.id,
                   updatedAt: Date.now(),
                 };
                 setCurrentConversation(updatedConv);
@@ -1099,10 +1147,12 @@ export function Chat() {
           role: 'assistant',
           content: `Error: ${(error as Error).message}`,
           timestamp: Date.now(),
+          parentId: parentForAssistant,
         };
         const updatedConv: Conversation = {
           ...conv,
           messages: [...conv.messages, errorMessage],
+          activeLeafId: errorMessage.id,
           updatedAt: Date.now(),
         };
         setCurrentConversation(updatedConv);
@@ -1120,12 +1170,19 @@ export function Chat() {
   }, [settings, projects, performSearch, performDriveSearch, performMemorySearch, performRAGSearch, performMCPToolCall, performArtifactToolCall, resetStreamingState, artifactParseStateRef, generateToolCallId, setSearchStatus, streamingArtifactsRef]);
 
   const handleSend = useCallback(async (content: string, attachments: Attachment[] = []) => {
+    // Determine parent from the active branch
+    const activePath = currentConversation
+      ? getActivePath(currentConversation.messages, currentConversation.activeLeafId)
+      : [];
+    const parentId = activePath.length > 0 ? activePath[activePath.length - 1].id : null;
+
     const userMessage: Message = {
       id: generateId(),
       role: 'user',
       content,
       attachments: attachments.length > 0 ? attachments : undefined,
       timestamp: Date.now(),
+      parentId,
     };
 
     let conv: Conversation;
@@ -1133,6 +1190,7 @@ export function Chat() {
       conv = {
         ...currentConversation,
         messages: [...currentConversation.messages, userMessage],
+        activeLeafId: userMessage.id,
         updatedAt: Date.now(),
       };
     } else {
@@ -1142,6 +1200,7 @@ export function Chat() {
         messages: [userMessage],
         provider: settings.provider,
         model: settings.model,
+        activeLeafId: userMessage.id,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -1157,6 +1216,7 @@ export function Chat() {
       content,
       attachments: attachments.length > 0 ? attachments : undefined,
       timestamp: Date.now(),
+      parentId: null,
     };
 
     // Get project to check for project-specific provider/model
@@ -1172,6 +1232,7 @@ export function Chat() {
       provider,
       model,
       projectId,
+      activeLeafId: userMessage.id,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -1181,56 +1242,74 @@ export function Chat() {
     await streamResponse(conv);
   }, [projects, settings.provider, settings.model, streamResponse]);
 
-  // Regenerate the last assistant response
+  // Regenerate the last assistant response (non-destructive: creates a sibling)
   const handleRegenerate = useCallback(async () => {
-    if (!currentConversation || currentConversation.messages.length < 2) return;
+    if (!currentConversation || displayMessages.length < 2) return;
 
-    const messages = currentConversation.messages;
-    const lastMessage = messages[messages.length - 1];
+    const lastDisplay = displayMessages[displayMessages.length - 1];
+    if (lastDisplay.role !== 'assistant') return;
 
-    // Only regenerate if the last message is from assistant
-    if (lastMessage.role !== 'assistant') return;
+    // Ensure tree structure for legacy conversations
+    const messages = ensureTreeStructure(currentConversation.messages);
 
-    // Remove the last assistant message and regenerate
+    // Point activeLeafId at the parent user message
+    // streamResponse will create a new assistant child = sibling of the old response
     const conv: Conversation = {
       ...currentConversation,
-      messages: messages.slice(0, -1),
+      messages,
+      activeLeafId: lastDisplay.parentId ?? undefined,
       updatedAt: Date.now(),
     };
 
     await streamResponse(conv);
-  }, [currentConversation, streamResponse]);
+  }, [currentConversation, displayMessages, streamResponse]);
 
-  // Edit a user message and resend from that point
+  // Edit a user message (non-destructive: creates a sibling branch)
   const handleEdit = useCallback(async (messageId: string, newContent: string) => {
     if (!currentConversation) return;
 
-    const messageIndex = currentConversation.messages.findIndex((m) => m.id === messageId);
-    if (messageIndex === -1) return;
+    // Ensure tree structure for legacy conversations
+    const messages = ensureTreeStructure(currentConversation.messages);
+    const original = messages.find(m => m.id === messageId);
+    if (!original || original.role !== 'user') return;
 
-    const originalMessage = currentConversation.messages[messageIndex];
-    if (originalMessage.role !== 'user') return;
-
-    // Create updated message with new content but keep attachments
-    const updatedMessage: Message = {
-      ...originalMessage,
+    // Create a sibling user message (same parent as original)
+    const newUserMessage: Message = {
+      id: generateId(),
+      role: 'user',
       content: newContent,
+      attachments: original.attachments,
+      parentId: original.parentId,
       timestamp: Date.now(),
     };
 
-    // Truncate conversation at edit point and replace user message
     const conv: Conversation = {
       ...currentConversation,
-      messages: [...currentConversation.messages.slice(0, messageIndex), updatedMessage],
+      messages: [...messages, newUserMessage],
+      activeLeafId: newUserMessage.id,
       updatedAt: Date.now(),
     };
 
     await streamResponse(conv);
   }, [currentConversation, streamResponse]);
 
-  // Find the last assistant message index
-  const lastAssistantMessageIndex = currentConversation?.messages
-    ? currentConversation.messages.map((m, i) => ({ role: m.role, index: i }))
+  // Switch to a sibling branch
+  const handleSwitchBranch = useCallback((messageId: string, direction: 'prev' | 'next') => {
+    if (!currentConversation) return;
+    const { siblings, index } = getSiblings(currentConversation.messages, messageId);
+    const newIdx = direction === 'prev' ? index - 1 : index + 1;
+    if (newIdx < 0 || newIdx >= siblings.length) return;
+
+    const newLeafId = getDefaultLeaf(currentConversation.messages, siblings[newIdx].id);
+    const updatedConv = { ...currentConversation, activeLeafId: newLeafId };
+    setCurrentConversation(updatedConv);
+    saveConversation(updatedConv);
+    setConversations(getConversations());
+  }, [currentConversation]);
+
+  // Find the last assistant message index in the displayed path
+  const lastAssistantMessageIndex = displayMessages.length > 0
+    ? displayMessages.map((m, i) => ({ role: m.role, index: i }))
         .filter((m) => m.role === 'assistant')
         .pop()?.index ?? -1
     : -1;
@@ -1314,7 +1393,12 @@ export function Chat() {
           </div>
           {!currentProjectId && !showKnowledgeBase && !showModelsConfig && !showConnectorsConfig && (
             <div className="flex items-center gap-4">
-              <TokenUsageDisplay usage={lastUsage} sessionUsage={sessionUsage} model={settings.model} />
+              <TokenUsageDisplay
+                sessionUsage={sessionUsage}
+                model={settings.model}
+                hasContextBreakdown={!!contextBreakdown}
+                onOpenContextInspector={() => setShowContextInspector(true)}
+              />
               <div className="flex items-center gap-2">
                 <select
                   value={settings.provider}
@@ -1396,21 +1480,52 @@ export function Chat() {
               onToggleGoogleDrive={handleToggleGoogleDrive}
               googleDriveConnected={!!settings.googleDriveAccessToken}
               onPickDriveFile={handlePickDriveFile}
+              currentProvider={(() => {
+                const project = projects.find(p => p.id === currentProjectId);
+                return project?.provider || settings.provider;
+              })()}
+              currentModel={(() => {
+                const project = projects.find(p => p.id === currentProjectId);
+                return project?.model || settings.model;
+              })()}
+              onModelChange={handleModelChange}
+              onProviderChange={handleProviderChange}
+              availableModels={(() => {
+                const project = projects.find(p => p.id === currentProjectId);
+                const provider = project?.provider || settings.provider;
+                return [
+                  ...DEFAULT_MODELS[provider],
+                  ...(settings.customModels?.[provider] || []),
+                ];
+              })()}
+              customModels={settings.customModels}
             />
-          ) : currentConversation?.messages.length ? (
+          ) : displayMessages.length ? (
             <>
-              {currentConversation.messages.map((message, index) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  artifacts={currentConversation.artifacts}
-                  isLastAssistantMessage={index === lastAssistantMessageIndex}
-                  isLoading={isLoading}
-                  onEdit={handleEdit}
-                  onRegenerate={handleRegenerate}
-                  onSelectArtifact={handleSelectArtifact}
-                />
-              ))}
+              {displayMessages.map((message, index) => {
+                const branchInfo = branchInfoMap.get(message.id);
+                const siblingCount = branchInfo?.siblings.length ?? 1;
+                const siblingIndex = branchInfo?.index ?? 0;
+                return (
+                  <ChatMessage
+                    key={message.id}
+                    message={message}
+                    artifacts={currentConversation?.artifacts}
+                    isLastAssistantMessage={index === lastAssistantMessageIndex}
+                    isLoading={isLoading}
+                    onEdit={handleEdit}
+                    onRegenerate={handleRegenerate}
+                    onSelectArtifact={handleSelectArtifact}
+                    onOpenContextInspector={(breakdown) => {
+                      setContextBreakdown(breakdown);
+                      setShowContextInspector(true);
+                    }}
+                    siblingCount={siblingCount}
+                    siblingIndex={siblingIndex}
+                    onSwitchBranch={handleSwitchBranch}
+                  />
+                );
+              })}
               {(streamingContent || streamingContentBlocks.length > 0 || currentToolCalls.length > 0) ? (
                 <div ref={streamingMessageRef}>
                   <ChatMessage
@@ -1475,6 +1590,15 @@ export function Chat() {
               onToggleGoogleDrive={handleToggleGoogleDrive}
               googleDriveConnected={!!settings.googleDriveAccessToken}
               onPickDriveFile={handlePickDriveFile}
+              currentProvider={settings.provider}
+              currentModel={settings.model}
+              onModelChange={handleModelChange}
+              onProviderChange={handleProviderChange}
+              availableModels={[
+                ...DEFAULT_MODELS[settings.provider],
+                ...(settings.customModels?.[settings.provider] || []),
+              ]}
+              customModels={settings.customModels}
             />
           </div>
         )}
@@ -1485,6 +1609,14 @@ export function Chat() {
           settings={settings}
           onSave={handleSaveSettings}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {/* Context Inspector */}
+      {showContextInspector && contextBreakdown && (
+        <ContextInspector
+          breakdown={contextBreakdown}
+          onClose={() => setShowContextInspector(false)}
         />
       )}
 

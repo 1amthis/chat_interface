@@ -71,6 +71,10 @@ export interface Message {
   toolCalls?: ToolCall[]; // Legacy: kept for backwards compatibility
   reasoning?: string; // Reasoning/thinking content from models like o3-mini, o1
   timestamp: number;
+  usage?: TokenUsage;    // Token usage for this response
+  model?: string;        // Model that generated this response (for cost calc)
+  contextBreakdown?: ContextBreakdown; // Context window state when this response was generated
+  parentId?: string | null; // null = root message, undefined = legacy (no branching)
 }
 
 export interface Project {
@@ -99,6 +103,7 @@ export interface Conversation {
   folderId?: string; // @deprecated - kept for migration
   createdAt: number;
   updatedAt: number;
+  activeLeafId?: string; // Leaf of the currently active branch (for conversation branching)
 }
 
 export interface ProviderConfig {
@@ -275,6 +280,22 @@ export interface TokenUsage {
   totalTokens: number;
   cachedTokens?: number;
   reasoningTokens?: number;
+}
+
+export interface ContextBreakdownSection {
+  label: string;
+  estimatedTokens: number;
+  percentage: number;
+  color: string;
+  details?: { label: string; estimatedTokens: number }[];
+}
+
+export interface ContextBreakdown {
+  sections: ContextBreakdownSection[];
+  totalEstimatedTokens: number;
+  contextWindowSize: number;
+  percentUsed: number;
+  model: string;
 }
 
 export interface ApiKeyValidationStatus {

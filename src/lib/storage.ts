@@ -1,6 +1,7 @@
 import { Conversation, ChatSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, Folder, Project, UsageRecord, Provider } from '@/types';
 import { calculateCost } from './model-metadata';
 import { STORAGE_LIMITS } from './constants';
+import { getActivePathIds } from './conversation-tree';
 
 const CONVERSATIONS_KEY = 'chat_conversations';
 const SETTINGS_KEY = 'chat_settings';
@@ -110,7 +111,8 @@ function trimConversations(conversations: Conversation[]): Conversation[] {
 }
 
 /**
- * Compress a conversation by removing old messages if it's too large
+ * Compress a conversation by removing old messages if it's too large.
+ * Tree-aware: prunes inactive branches first, then truncates the active path.
  */
 function compressConversation(conversation: Conversation): Conversation {
   const size = getConversationSize(conversation);
@@ -121,13 +123,34 @@ function compressConversation(conversation: Conversation): Conversation {
 
   console.warn(`[Storage] Conversation "${conversation.title}" is ${Math.round(size / 1024)}KB, compressing...`);
 
-  // Keep progressively fewer messages until under limit
-  const messages = [...conversation.messages];
-  let keepCount = Math.floor(messages.length / 2);
   let compressed = conversation;
+
+  // Phase 1: If branched, prune inactive branches first (keep only active path)
+  if (conversation.activeLeafId && conversation.messages.some(m => m.parentId !== undefined)) {
+    const activeIds = getActivePathIds(conversation.messages, conversation.activeLeafId);
+    const activeMessages = conversation.messages.filter(m => activeIds.has(m.id));
+    compressed = {
+      ...conversation,
+      messages: activeMessages,
+    };
+
+    if (getConversationSize(compressed) <= MAX_CONVERSATION_SIZE) {
+      const pruneSize = getConversationSize(compressed);
+      console.warn(`[Storage] Pruned inactive branches: ${Math.round(pruneSize / 1024)}KB (kept ${compressed.messages.length}/${conversation.messages.length} messages)`);
+      return compressed;
+    }
+  }
+
+  // Phase 2: Truncate the active path from the beginning
+  const messages = [...compressed.messages];
+  let keepCount = Math.floor(messages.length / 2);
 
   while (keepCount > 5 && getConversationSize(compressed) > MAX_CONVERSATION_SIZE) {
     const recentMessages = messages.slice(-keepCount);
+    // Fix parentId of new first message to null (it's now a root)
+    if (recentMessages.length > 0 && recentMessages[0].parentId !== undefined) {
+      recentMessages[0] = { ...recentMessages[0], parentId: null };
+    }
     compressed = {
       ...conversation,
       messages: recentMessages,

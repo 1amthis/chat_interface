@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { Message, Attachment, ContentBlock, Artifact, ReasoningContentBlock } from '@/types';
+import { Message, Attachment, ContentBlock, Artifact, ReasoningContentBlock, ContextBreakdown } from '@/types';
 import { MarkdownMessage } from './MarkdownMessage';
 import ToolCallDisplay from './ToolCallDisplay';
 import { ArtifactCard } from './ArtifactCard';
+import { MessageUsageDisplay } from './MessageUsageDisplay';
 import { formatFileSize } from '@/lib/utils';
 
 // Reasoning display component for o-series models
@@ -105,6 +106,52 @@ interface ChatMessageProps {
   onEdit?: (messageId: string, newContent: string) => void;
   onRegenerate?: () => void;
   onSelectArtifact?: (artifactId: string) => void;
+  onOpenContextInspector?: (breakdown: ContextBreakdown) => void;
+  siblingCount?: number;
+  siblingIndex?: number;
+  onSwitchBranch?: (messageId: string, direction: 'prev' | 'next') => void;
+}
+
+function BranchNavigator({
+  messageId,
+  siblingCount,
+  siblingIndex,
+  onSwitchBranch,
+}: {
+  messageId: string;
+  siblingCount: number;
+  siblingIndex: number;
+  onSwitchBranch: (messageId: string, direction: 'prev' | 'next') => void;
+}) {
+  if (siblingCount <= 1) return null;
+
+  return (
+    <span className="inline-flex items-center gap-0.5 text-xs text-gray-500 dark:text-gray-400 select-none">
+      <button
+        onClick={() => onSwitchBranch(messageId, 'prev')}
+        disabled={siblingIndex <= 0}
+        className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-default transition-colors"
+        aria-label="Previous branch"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
+      <span className="tabular-nums min-w-[2.5em] text-center">
+        {siblingIndex + 1}/{siblingCount}
+      </span>
+      <button
+        onClick={() => onSwitchBranch(messageId, 'next')}
+        disabled={siblingIndex >= siblingCount - 1}
+        className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-default transition-colors"
+        aria-label="Next branch"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+    </span>
+  );
 }
 
 function AttachmentPreview({ attachment }: { attachment: Attachment }) {
@@ -164,6 +211,10 @@ export function ChatMessage({
   onEdit,
   onRegenerate,
   onSelectArtifact,
+  onOpenContextInspector,
+  siblingCount,
+  siblingIndex,
+  onSwitchBranch,
 }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const [isEditing, setIsEditing] = useState(false);
@@ -210,7 +261,17 @@ export function ChatMessage({
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-medium text-sm mb-1 flex items-center justify-between">
-            <span>{isUser ? 'You' : 'Assistant'}</span>
+            <span className="flex items-center gap-2">
+              {isUser ? 'You' : 'Assistant'}
+              {siblingCount !== undefined && siblingIndex !== undefined && onSwitchBranch && (
+                <BranchNavigator
+                  messageId={message.id}
+                  siblingCount={siblingCount}
+                  siblingIndex={siblingIndex}
+                  onSwitchBranch={onSwitchBranch}
+                />
+              )}
+            </span>
 
             {/* Action buttons - show on hover */}
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -309,6 +370,14 @@ export function ChatMessage({
               </>
             )}
           </div>
+          {!isUser && message.usage && (
+            <MessageUsageDisplay
+              usage={message.usage}
+              model={message.model}
+              contextBreakdown={message.contextBreakdown}
+              onOpenContextInspector={onOpenContextInspector}
+            />
+          )}
         </div>
       </div>
     </div>
