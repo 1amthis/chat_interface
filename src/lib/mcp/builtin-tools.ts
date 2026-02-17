@@ -352,6 +352,192 @@ export async function filesystemList(
   }
 }
 
+// HTML cleaning helpers for fetch_url
+
+/** Extract <title> text from HTML */
+function extractTitle(html: string): string | null {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return match ? match[1].trim() : null;
+}
+
+/** Extract the main content region from HTML */
+function extractMainContent(html: string): { content: string; isolated: boolean } {
+  // Try <main> first
+  const mainMatch = html.match(/<main[\s>][\s\S]*?<\/main>/i);
+  if (mainMatch) return { content: mainMatch[0], isolated: true };
+
+  // Try <article> (use the longest one as a heuristic for "largest")
+  const articleMatches = html.match(/<article[\s>][\s\S]*?<\/article>/gi);
+  if (articleMatches && articleMatches.length > 0) {
+    const longest = articleMatches.reduce((a, b) => (a.length >= b.length ? a : b));
+    return { content: longest, isolated: true };
+  }
+
+  // Try <div role="main">
+  const roleMainMatch = html.match(/<div[^>]+role\s*=\s*["']main["'][^>]*>[\s\S]*?<\/div>/i);
+  if (roleMainMatch) return { content: roleMainMatch[0], isolated: true };
+
+  // Try <body>
+  const bodyMatch = html.match(/<body[\s>][\s\S]*?<\/body>/i);
+  if (bodyMatch) return { content: bodyMatch[0], isolated: false };
+
+  return { content: html, isolated: false };
+}
+
+/** Remove noise elements and their content */
+function removeNoiseTags(html: string, isolated: boolean): string {
+  const alwaysRemove = ['script', 'style', 'noscript', 'svg', 'nav', 'footer', 'aside', 'iframe', 'form', 'select'];
+  const tags = isolated ? [...alwaysRemove, 'header'] : alwaysRemove;
+  let result = html;
+  for (const tag of tags) {
+    result = result.replace(new RegExp(`<${tag}[\\s>][\\s\\S]*?<\\/${tag}>`, 'gi'), '');
+    // Also remove self-closing variants
+    result = result.replace(new RegExp(`<${tag}[^>]*\\/?>`, 'gi'), '');
+  }
+  // Remove HTML comments
+  result = result.replace(/<!--[\s\S]*?-->/g, '');
+  return result;
+}
+
+/** Convert structural HTML elements to plain text equivalents */
+function convertStructuralElements(html: string): string {
+  let text = html;
+
+  // Convert headings to markdown-style
+  for (let i = 1; i <= 6; i++) {
+    const prefix = '#'.repeat(i);
+    text = text.replace(
+      new RegExp(`<h${i}[^>]*>([\\s\\S]*?)<\\/h${i}>`, 'gi'),
+      (_, content) => `\n\n${prefix} ${content.trim()}\n\n`
+    );
+  }
+
+  // Convert <pre> to fenced code blocks
+  text = text.replace(
+    /<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi,
+    (_, content) => `\n\n\`\`\`\n${content}\n\`\`\`\n\n`
+  );
+  text = text.replace(
+    /<pre[^>]*>([\s\S]*?)<\/pre>/gi,
+    (_, content) => `\n\n\`\`\`\n${content}\n\`\`\`\n\n`
+  );
+
+  // Convert inline code
+  text = text.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`');
+
+  // Convert bold/strong
+  text = text.replace(/<(?:b|strong)[^>]*>([\s\S]*?)<\/(?:b|strong)>/gi, '**$1**');
+
+  // Convert italic/em
+  text = text.replace(/<(?:i|em)[^>]*>([\s\S]*?)<\/(?:i|em)>/gi, '*$1*');
+
+  // Convert links: <a href="url">text</a> -> text (url)
+  text = text.replace(
+    /<a[^>]+href\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    (_, href, linkText) => {
+      const cleanText = linkText.trim();
+      if (!href || href.startsWith('#') || href.startsWith('javascript:')) {
+        return cleanText;
+      }
+      return cleanText === href ? href : `${cleanText} (${href})`;
+    }
+  );
+
+  // Convert table cells
+  text = text.replace(/<\/th>\s*<th[^>]*>/gi, ' | ');
+  text = text.replace(/<\/td>\s*<td[^>]*>/gi, ' | ');
+  text = text.replace(/<tr[^>]*>/gi, '\n');
+  text = text.replace(/<\/tr>/gi, '');
+
+  // Convert list items
+  text = text.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, content) => `\n- ${content.trim()}`);
+
+  // Convert paragraphs and line breaks
+  text = text.replace(/<p[^>]*>/gi, '\n\n');
+  text = text.replace(/<\/p>/gi, '');
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text.replace(/<hr\s*\/?>/gi, '\n---\n');
+
+  // Convert blockquotes
+  text = text.replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, content) => {
+    return content.trim().split('\n').map((line: string) => `> ${line}`).join('\n');
+  });
+
+  return text;
+}
+
+/** Decode common HTML entities */
+function decodeHtmlEntities(text: string): string {
+  const entities: Record<string, string> = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&apos;': "'",
+    '&nbsp;': ' ',
+    '&ndash;': '\u2013',
+    '&mdash;': '\u2014',
+    '&lsquo;': '\u2018',
+    '&rsquo;': '\u2019',
+    '&ldquo;': '\u201C',
+    '&rdquo;': '\u201D',
+    '&bull;': '\u2022',
+    '&hellip;': '\u2026',
+    '&copy;': '\u00A9',
+    '&reg;': '\u00AE',
+    '&trade;': '\u2122',
+  };
+
+  let result = text;
+  for (const [entity, char] of Object.entries(entities)) {
+    result = result.split(entity).join(char);
+  }
+
+  // Decode numeric entities: &#123; and &#x1A;
+  result = result.replace(/&#(\d+);/g, (_, num) => {
+    const code = parseInt(num, 10);
+    return code > 0 && code < 0x10FFFF ? String.fromCodePoint(code) : '';
+  });
+  result = result.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+    const code = parseInt(hex, 16);
+    return code > 0 && code < 0x10FFFF ? String.fromCodePoint(code) : '';
+  });
+
+  return result;
+}
+
+/** Collapse whitespace and limit consecutive newlines */
+function normalizeWhitespace(text: string): string {
+  // Strip all remaining HTML tags
+  let result = text.replace(/<[^>]+>/g, '');
+  // Collapse runs of spaces/tabs (but not newlines)
+  result = result.replace(/[^\S\n]+/g, ' ');
+  // Trim each line
+  result = result.split('\n').map(line => line.trim()).join('\n');
+  // Limit consecutive newlines to 2
+  result = result.replace(/\n{3,}/g, '\n\n');
+  return result.trim();
+}
+
+/** Clean HTML to readable plain text */
+function cleanHtml(html: string): { title: string | null; content: string } {
+  const title = extractTitle(html);
+  const { content: mainContent, isolated } = extractMainContent(html);
+  const stripped = removeNoiseTags(mainContent, isolated);
+  const converted = convertStructuralElements(stripped);
+  const decoded = decodeHtmlEntities(converted);
+  const normalized = normalizeWhitespace(decoded);
+  return { title, content: normalized };
+}
+
+/** Content types that indicate binary data */
+const BINARY_CONTENT_TYPES = [
+  'image/', 'audio/', 'video/', 'application/pdf', 'application/zip',
+  'application/gzip', 'application/octet-stream', 'application/wasm',
+  'font/', 'application/x-tar',
+];
+
 export async function fetchUrl(
   url: string,
   config: BuiltinToolsConfig
@@ -392,30 +578,31 @@ export async function fetchUrl(
   }
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'ChatInterface/1.0',
-      },
-      // Don't follow redirects to different hosts (SSRF prevention)
-      redirect: 'manual',
-    });
+    let currentUrl = url;
+    let response: Response | null = null;
+    const maxRedirects = 5;
 
-    // Check for redirect to different host
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      if (location) {
-        const redirectUrl = new URL(location, url).href;
+    // Follow redirects manually with SSRF validation at each hop
+    for (let i = 0; i <= maxRedirects; i++) {
+      response = await fetch(currentUrl, {
+        headers: {
+          'User-Agent': 'ChatInterface/1.0',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        redirect: 'manual',
+      });
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (!location) break; // No location header, stop redirecting
+
+        const redirectUrl = new URL(location, currentUrl).href;
 
         // Validate redirect URL for SSRF
         const redirectValidation = await validateUrl(redirectUrl);
         if (!redirectValidation.valid) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Redirect blocked: ${redirectValidation.error}`,
-              },
-            ],
+            content: [{ type: 'text', text: `Redirect blocked: ${redirectValidation.error}` }],
             isError: true,
           };
         }
@@ -423,32 +610,90 @@ export async function fetchUrl(
         // Also check redirect against domain allowlist
         if (!isDomainAllowed(redirectUrl, fetchConfig.allowedDomains || [])) {
           return {
-            content: [
-              {
-                type: 'text',
-                text: `Redirect to different domain blocked: ${location}`,
-              },
-            ],
+            content: [{ type: 'text', text: `Redirect to different domain blocked: ${location}` }],
             isError: true,
           };
         }
+
+        currentUrl = redirectUrl;
+        continue;
       }
+
+      break; // Not a redirect, we're done
     }
 
-    const text = await response.text();
+    if (!response) {
+      return {
+        content: [{ type: 'text', text: 'Error fetching URL: no response received' }],
+        isError: true,
+      };
+    }
 
-    // Limit response size
-    const maxSize = 100000; // 100KB
-    const truncated =
-      text.length > maxSize ? text.slice(0, maxSize) + '\n...(truncated)' : text;
+    // Check for binary content types — don't read body as text
+    const contentType = response.headers.get('content-type') || '';
+    const isBinary = BINARY_CONTENT_TYPES.some(prefix => contentType.toLowerCase().includes(prefix));
+    if (isBinary) {
+      const contentLength = response.headers.get('content-length');
+      const sizeInfo = contentLength ? ` (${Math.round(parseInt(contentLength) / 1024)} KB)` : '';
+      return {
+        content: [{
+          type: 'text',
+          text: `URL: ${currentUrl}\nStatus: ${response.status}\nContent-Type: ${contentType}\n\nBinary content detected${sizeInfo}. This content type cannot be displayed as text.`,
+        }],
+        isError: false,
+      };
+    }
+
+    const rawText = await response.text();
+
+    // Detect content type
+    const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml');
+    const isJson = contentType.includes('application/json') || contentType.includes('+json');
+    const looksLikeHtml = !isHtml && /^\s*<!doctype\s+html|^\s*<html[\s>]/i.test(rawText.slice(0, 500));
+
+    let processedContent: string;
+    let title: string | null = null;
+    let contentTypeLabel: string;
+
+    if (isHtml || looksLikeHtml) {
+      // Cap raw HTML at 5MB before running regexes
+      const htmlToProcess = rawText.length > 5_000_000 ? rawText.slice(0, 5_000_000) : rawText;
+      const cleaned = cleanHtml(htmlToProcess);
+      title = cleaned.title;
+      processedContent = cleaned.content;
+      contentTypeLabel = 'HTML (cleaned)';
+
+      // SPA fallback: if cleaned content is essentially empty
+      if (processedContent.length < 50) {
+        processedContent = 'Page content appears to be dynamically rendered via JavaScript and could not be extracted.';
+      }
+    } else if (isJson) {
+      contentTypeLabel = 'JSON';
+      try {
+        const parsed = JSON.parse(rawText);
+        processedContent = JSON.stringify(parsed, null, 2);
+      } catch {
+        processedContent = rawText;
+      }
+    } else {
+      contentTypeLabel = contentType || 'unknown';
+      processedContent = rawText;
+    }
+
+    // Limit processed content size
+    const maxSize = 100_000; // 100KB
+    if (processedContent.length > maxSize) {
+      processedContent = processedContent.slice(0, maxSize) + '\n...(truncated)';
+    }
+
+    // Build structured response
+    const parts = [`URL: ${currentUrl}`, `Status: ${response.status}`];
+    if (title) parts.push(`Title: ${title}`);
+    parts.push(`Content-Type: ${contentTypeLabel}`);
+    parts.push('', processedContent);
 
     return {
-      content: [
-        {
-          type: 'text',
-          text: `Status: ${response.status}\n\n${truncated}`,
-        },
-      ],
+      content: [{ type: 'text', text: parts.join('\n') }],
       isError: !response.ok,
     };
   } catch (error) {
@@ -560,7 +805,7 @@ export function getBuiltinTools(config: BuiltinToolsConfig): UnifiedTool[] {
     tools.push({
       source: 'builtin',
       name: 'fetch_url',
-      description: 'Fetch the content of a URL',
+      description: 'Fetch a URL and extract its readable content. HTML pages are automatically cleaned to plain text with scripts, styles, and navigation removed. JSON responses are pretty-printed.',
       parameters: {
         type: 'object',
         properties: {

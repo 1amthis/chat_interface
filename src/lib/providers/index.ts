@@ -80,12 +80,14 @@ export async function* streamChat(
 ): AsyncGenerator<StreamChunk> {
   const { provider, model } = settings;
 
+  const { temperature, maxOutputTokens, openaiReasoningEffort } = settings;
+
   if (provider === 'openai') {
     // Use Responses API for reasoning-capable models (gpt-5 + o-series) to get reasoning summaries
     if (isOpenAIReasoningModel(model)) {
-      yield* streamOpenAIResponses(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions, ragEnabled, artifactsEnabled);
+      yield* streamOpenAIResponses(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions, ragEnabled, artifactsEnabled, temperature, maxOutputTokens, openaiReasoningEffort);
     } else {
-      yield* streamOpenAI(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions, ragEnabled, artifactsEnabled);
+      yield* streamOpenAI(messages, model, settings.openaiKey, systemPrompt, webSearchEnabled, searchResults, googleDriveEnabled, driveSearchResults, memorySearchEnabled, mcpTools, toolExecutions, ragEnabled, artifactsEnabled, temperature, maxOutputTokens);
     }
   } else if (provider === 'anthropic') {
     yield* streamAnthropic(
@@ -103,7 +105,9 @@ export async function* streamChat(
       settings.anthropicThinkingEnabled,
       settings.anthropicThinkingBudgetTokens,
       ragEnabled,
-      artifactsEnabled
+      artifactsEnabled,
+      temperature,
+      maxOutputTokens
     );
   } else if (provider === 'google') {
     yield* streamGoogle(
@@ -119,7 +123,12 @@ export async function* streamChat(
       mcpTools,
       toolExecutions,
       ragEnabled,
-      artifactsEnabled
+      artifactsEnabled,
+      temperature,
+      maxOutputTokens,
+      settings.googleThinkingEnabled,
+      settings.googleThinkingBudget,
+      settings.googleThinkingLevel,
     );
   } else if (provider === 'mistral') {
     yield* streamMistral(
@@ -135,7 +144,9 @@ export async function* streamChat(
       mcpTools,
       toolExecutions,
       ragEnabled,
-      artifactsEnabled
+      artifactsEnabled,
+      temperature,
+      maxOutputTokens
     );
   } else if (provider === 'cerebras') {
     yield* streamCerebras(
@@ -151,7 +162,9 @@ export async function* streamChat(
       mcpTools,
       toolExecutions,
       ragEnabled,
-      artifactsEnabled
+      artifactsEnabled,
+      temperature,
+      maxOutputTokens
     );
   }
 }

@@ -27,7 +27,9 @@ export async function* streamOpenAI(
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
   ragEnabled?: boolean,
-  artifactsEnabled?: boolean
+  artifactsEnabled?: boolean,
+  temperature?: number,
+  maxOutputTokens?: number
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('OpenAI API key is required');
 
@@ -91,12 +93,19 @@ export async function* streamOpenAI(
     stream_options: { include_usage: true },
   };
 
+  // Apply generation parameters
+  if (temperature !== undefined) {
+    requestOptions.temperature = temperature;
+  }
+
   // For reasoning models (o-series), use max_completion_tokens instead of max_tokens
   // Note: Reasoning summaries require the Responses API, not Chat Completions API
   // The Chat Completions API does not expose reasoning content for o-series models
   if (isReasoningModel) {
     const reqAny = requestOptions as unknown as Record<string, unknown>;
-    reqAny.max_completion_tokens = 16384;
+    reqAny.max_completion_tokens = maxOutputTokens || 16384;
+  } else if (maxOutputTokens !== undefined) {
+    requestOptions.max_tokens = maxOutputTokens;
   }
 
   // Build tools array based on enabled features
@@ -359,7 +368,10 @@ export async function* streamOpenAIResponses(
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
   ragEnabled?: boolean,
-  artifactsEnabled?: boolean
+  artifactsEnabled?: boolean,
+  temperature?: number,
+  maxOutputTokens?: number,
+  openaiReasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('OpenAI API key is required');
 
@@ -442,11 +454,15 @@ export async function* streamOpenAIResponses(
     input: inputMessages,
     stream: true,
     reasoning: {
-      effort: 'medium',
+      effort: openaiReasoningEffort || 'medium',
       summary: 'auto',
     },
-    max_output_tokens: 16384,
+    max_output_tokens: maxOutputTokens || 16384,
   };
+
+  if (temperature !== undefined) {
+    requestOptions.temperature = temperature;
+  }
 
   // Add system prompt as instructions
   if (systemPrompt) {

@@ -1,4 +1,5 @@
-import { Conversation, ChatSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, Folder, Project } from '@/types';
+import { Conversation, ChatSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, Folder, Project, UsageRecord, Provider } from '@/types';
+import { calculateCost } from './model-metadata';
 import { STORAGE_LIMITS } from './constants';
 
 const CONVERSATIONS_KEY = 'chat_conversations';
@@ -6,6 +7,8 @@ const SETTINGS_KEY = 'chat_settings';
 const FOLDERS_KEY = 'chat_folders';
 const PROJECTS_KEY = 'chat_projects';
 const MIGRATION_KEY = 'chat_migration_v1';
+const USAGE_RECORDS_KEY = 'chat_usage_records';
+const MAX_USAGE_RECORDS = 5000;
 
 // Destructure storage limits for convenience
 const { MAX_TOTAL_SIZE: MAX_STORAGE_SIZE, MAX_CONVERSATION_SIZE, MAX_CONVERSATIONS } = STORAGE_LIMITS;
@@ -218,7 +221,10 @@ export function getSettings(): ChatSettings {
   const parsed = data ? (JSON.parse(data) as Partial<ChatSettings>) : {};
   const merged: ChatSettings = { ...DEFAULT_SETTINGS, ...parsed };
 
-  const allowedModels = DEFAULT_MODELS[merged.provider];
+  const allowedModels = [
+    ...DEFAULT_MODELS[merged.provider],
+    ...(merged.customModels?.[merged.provider] || []),
+  ];
   if (!allowedModels.includes(merged.model)) {
     return { ...merged, model: allowedModels[0] };
   }
@@ -383,4 +389,79 @@ export function importConversations(jsonData: string): void {
   } catch (error) {
     throw new Error('Invalid conversation data');
   }
+}
+
+// ── Usage record tracking ─────────────────────────────────
+
+export function getUsageRecords(): UsageRecord[] {
+  if (typeof window === 'undefined') return [];
+  const data = localStorage.getItem(USAGE_RECORDS_KEY);
+  return data ? JSON.parse(data) : [];
+}
+
+export function addUsageRecord(record: UsageRecord): void {
+  if (typeof window === 'undefined') return;
+  const records = getUsageRecords();
+  records.push(record);
+  // Cap at MAX_USAGE_RECORDS, trimming oldest first
+  const trimmed = records.length > MAX_USAGE_RECORDS
+    ? records.slice(records.length - MAX_USAGE_RECORDS)
+    : records;
+  localStorage.setItem(USAGE_RECORDS_KEY, JSON.stringify(trimmed));
+}
+
+export interface AggregatedUsage {
+  provider: Provider;
+  model: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  reasoningTokens: number;
+  estimatedCost: number | null;
+  lastUsed: number;
+}
+
+export function getAggregatedUsage(since?: number): AggregatedUsage[] {
+  const records = getUsageRecords().filter(r => !since || r.timestamp >= since);
+  const map = new Map<string, AggregatedUsage>();
+
+  for (const r of records) {
+    const key = `${r.provider}:${r.model}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.requests += 1;
+      existing.inputTokens += r.inputTokens;
+      existing.outputTokens += r.outputTokens;
+      existing.cacheReadTokens += r.cacheReadTokens;
+      existing.reasoningTokens += r.reasoningTokens;
+      if (r.timestamp > existing.lastUsed) existing.lastUsed = r.timestamp;
+    } else {
+      map.set(key, {
+        provider: r.provider,
+        model: r.model,
+        requests: 1,
+        inputTokens: r.inputTokens,
+        outputTokens: r.outputTokens,
+        cacheReadTokens: r.cacheReadTokens,
+        reasoningTokens: r.reasoningTokens,
+        estimatedCost: null,
+        lastUsed: r.timestamp,
+      });
+    }
+  }
+
+  const result = Array.from(map.values());
+  // Calculate cost for each aggregation
+  for (const entry of result) {
+    entry.estimatedCost = calculateCost(entry.model, entry.inputTokens, entry.outputTokens, entry.cacheReadTokens);
+  }
+  // Sort by last used, descending
+  result.sort((a, b) => b.lastUsed - a.lastUsed);
+  return result;
+}
+
+export function clearUsageRecords(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(USAGE_RECORDS_KEY);
 }

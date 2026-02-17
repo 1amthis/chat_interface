@@ -14,6 +14,7 @@ import {
   storeChunks,
   getAllDocuments,
   getAllChunks,
+  getChunksByDocumentId,
   removeDocument as dbRemoveDocument,
   clearAll,
   getStats,
@@ -21,7 +22,7 @@ import {
 import { searchChunks } from './search';
 
 // Re-export types
-export type { RAGDocument, RAGSearchResult, RAGUploadProgress } from './types';
+export type { RAGDocument, RAGSearchResult, RAGUploadProgress, RAGChunk } from './types';
 
 const BINARY_EXTENSIONS = new Set(['pdf', 'docx', 'xlsx', 'xls']);
 
@@ -128,7 +129,7 @@ export async function removeDocument(documentId: string): Promise<void> {
 export async function searchRAG(
   query: string,
   openaiKey: string,
-  options?: { limit?: number }
+  options?: { limit?: number; minScore?: number }
 ): Promise<RAGSearchResult[]> {
   if (!query || !query.trim()) {
     return [];
@@ -153,6 +154,7 @@ export async function searchRAG(
 
     return searchChunks(queryEmbedding, chunks, documentNames, {
       limit: options?.limit ?? 5,
+      minScore: options?.minScore,
     });
   } catch (error) {
     console.error('RAG search error:', error);
@@ -182,6 +184,13 @@ export async function getRAGStats(): Promise<{
  */
 export async function clearRAGStore(): Promise<void> {
   await clearAll();
+}
+
+/**
+ * Get all chunks for a specific document (for chunk inspector)
+ */
+export async function getDocumentChunks(documentId: string): Promise<RAGChunk[]> {
+  return getChunksByDocumentId(documentId);
 }
 
 /**

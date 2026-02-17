@@ -26,7 +26,12 @@ export async function* streamGoogle(
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
   ragEnabled?: boolean,
-  artifactsEnabled?: boolean
+  artifactsEnabled?: boolean,
+  temperature?: number,
+  maxOutputTokens?: number,
+  googleThinkingEnabled?: boolean,
+  googleThinkingBudget?: number,
+  googleThinkingLevel?: 'minimal' | 'low' | 'medium' | 'high'
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Google Gemini API key is required');
 
@@ -89,11 +94,37 @@ export async function* streamGoogle(
     });
   }
 
+  const generationConfig: Record<string, unknown> = {
+    maxOutputTokens: maxOutputTokens || 4096,
+  };
+  if (temperature !== undefined) {
+    generationConfig.temperature = temperature;
+  }
+
+  // Gemini 2.5+ models think by default. Always request thought summaries
+  // so they appear in the UI. The thinkingEnabled toggle and budget/level
+  // settings control HOW much thinking happens, not whether we see it.
+  const isThinkingCapable = model.includes('gemini-2.5') || model.includes('gemini-3');
+
+  if (isThinkingCapable) {
+    const thinkingConfig: Record<string, unknown> = {
+      includeThoughts: true,
+    };
+
+    if (googleThinkingEnabled) {
+      if (isGemini3 && googleThinkingLevel) {
+        thinkingConfig.thinkingLevel = googleThinkingLevel.toUpperCase();
+      } else if (!isGemini3 && googleThinkingBudget !== undefined) {
+        thinkingConfig.thinkingBudget = googleThinkingBudget;
+      }
+    }
+
+    generationConfig.thinkingConfig = thinkingConfig;
+  }
+
   const requestBody: Record<string, unknown> = {
     contents,
-    generationConfig: {
-      maxOutputTokens: 4096,
-    },
+    generationConfig,
   };
 
   if (systemPrompt) {
@@ -177,6 +208,12 @@ export async function* streamGoogle(
       const toolCallsInCandidate: ToolCallInfo[] = [];
 
       for (const part of parts) {
+        // Handle thinking/thought parts from Gemini models
+        if (part.thought === true && part.text) {
+          emitted.push({ type: 'reasoning', reasoning: part.text as string });
+          continue;
+        }
+
         const text = part.text as string | undefined;
         if (text) {
           emitted.push({ type: 'content', content: text });

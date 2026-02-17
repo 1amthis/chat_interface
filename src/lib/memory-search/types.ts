@@ -54,6 +54,9 @@ export interface SearchOptions {
   projectId?: string;
   excludeConversationId?: string;
   minScore?: number;
+  snippetLength?: number;
+  k1?: number;
+  b?: number;
 }
 
 // Index statistics for UI display

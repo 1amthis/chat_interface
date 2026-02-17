@@ -6,19 +6,17 @@
 import { IndexedDocument, IndexMetadata, MemorySearchResult } from './types';
 import { tokenize } from './tokenizer';
 
-// BM25 tuning parameters
-// k1: Term frequency saturation parameter (1.2-2.0 is typical)
-// b: Document length normalization (0.75 is typical)
-const K1 = 1.2;
-const B = 0.75;
-
 /**
  * Calculate BM25 score for a single document against a query
+ * @param k1 - Term frequency saturation (1.2-2.0 typical)
+ * @param b  - Document length normalization (0.75 typical)
  */
 export function calculateBM25Score(
   queryTerms: string[],
   doc: IndexedDocument,
-  metadata: IndexMetadata
+  metadata: IndexMetadata,
+  k1: number = 1.2,
+  b: number = 0.75
 ): number {
   let score = 0;
   const N = metadata.totalDocuments;
@@ -36,8 +34,8 @@ export function calculateBM25Score(
     const idf = Math.log((N - df + 0.5) / (df + 0.5) + 1);
 
     // TF component with saturation and length normalization
-    const numerator = tf * (K1 + 1);
-    const denominator = tf + K1 * (1 - B + B * (dl / avgDl));
+    const numerator = tf * (k1 + 1);
+    const denominator = tf + k1 * (1 - b + b * (dl / avgDl));
 
     score += idf * (numerator / denominator);
   }
@@ -132,6 +130,9 @@ export function searchWithBM25(
     projectId?: string;
     excludeConversationId?: string;
     minScore?: number;
+    snippetLength?: number;
+    k1?: number;
+    b?: number;
   } = {}
 ): MemorySearchResult[] {
   const {
@@ -139,6 +140,9 @@ export function searchWithBM25(
     projectId,
     excludeConversationId,
     minScore = 0.1,
+    snippetLength = 150,
+    k1 = 1.2,
+    b = 0.75,
   } = options;
 
   // Tokenize query
@@ -159,7 +163,7 @@ export function searchWithBM25(
       continue;
     }
 
-    const score = calculateBM25Score(queryTerms, doc, metadata);
+    const score = calculateBM25Score(queryTerms, doc, metadata, k1, b);
     if (score >= minScore) {
       scored.push({ doc, score });
     }
@@ -177,7 +181,7 @@ export function searchWithBM25(
     content: doc.content,
     timestamp: doc.timestamp,
     score,
-    snippet: generateSnippet(doc.content, queryTerms),
+    snippet: generateSnippet(doc.content, queryTerms, snippetLength),
     projectId: doc.projectId,
   }));
 }

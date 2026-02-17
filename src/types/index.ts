@@ -176,25 +176,52 @@ export interface ChatSettings {
   ragChunkStrategy?: 'paragraph' | 'fixed' | 'sentence' | 'markdown';
   ragChunkSize?: number;    // 500–5000, default 2000
   ragChunkOverlap?: number; // 0–500, default 200
+  // Memory search tuning
+  memorySearchLimit?: number;         // 1-20, default 5
+  memorySearchMinScore?: number;      // 0-1, default 0.1
+  memorySearchSnippetLength?: number; // 50-500, default 150
+  bm25K1?: number;                    // 0.5-3.0, default 1.2
+  bm25B?: number;                     // 0-1.0, default 0.75
+  // RAG search tuning
+  ragSearchLimit?: number;            // 1-20, default 5
+  ragSearchMinScore?: number;         // 0-1, default 0.3
   // Artifacts settings
   artifactsEnabled?: boolean;
+  // Generation parameters (undefined = provider defaults)
+  temperature?: number;
+  maxOutputTokens?: number;
+  // OpenAI reasoning effort (gpt-5, o-series)
+  openaiReasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  // Google thinking settings
+  googleThinkingEnabled?: boolean;
+  googleThinkingBudget?: number;   // Gemini 2.5: 0-32768, -1 for dynamic
+  googleThinkingLevel?: 'minimal' | 'low' | 'medium' | 'high'; // Gemini 3
+  // Custom models per provider (persisted)
+  customModels?: Partial<Record<Provider, string[]>>;
+  // API key validation cache
+  apiKeyValidation?: Partial<Record<Provider, ApiKeyValidationStatus>>;
 }
 
 export const DEFAULT_MODELS: Record<Provider, string[]> = {
   openai: [
-    'gpt-5',
-    'gpt-5.1',
     'gpt-5.2',
+    'gpt-5.1',
+    'gpt-5',
     'gpt-5-mini',
     'gpt-5-nano',
+    'o3',
+    'o3-mini',
+    'o3-pro',
+    'o4-mini',
+    'gpt-4.1',
+    'gpt-4.1-mini',
+    'gpt-4.1-nano',
   ],
   anthropic: [
+    'claude-opus-4-6',
     'claude-sonnet-4-5',
-    'claude-opus-4-5',
     'claude-haiku-4-5',
-    'claude-sonnet-4-5-20250929',
-    'claude-opus-4-5-20251101',
-    'claude-haiku-4-5-20251001',
+    'claude-opus-4-5',
   ],
   google: [
     'gemini-3-pro-preview',
@@ -202,21 +229,19 @@ export const DEFAULT_MODELS: Record<Provider, string[]> = {
     'gemini-2.5-pro',
     'gemini-2.5-flash',
     'gemini-2.5-flash-lite',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
   ],
   mistral: [
-    'mistral-large-latest',
-    'mistral-medium-latest',
-    'mistral-small-latest',
+    'mistral-medium-2508',
+    'mistral-small-2506',
+    'magistral-medium-latest',
+    'magistral-small-latest',
+    'codestral-2508',
   ],
   cerebras: [
-    'llama-3.3-70b',
-    'qwen-3-32b',
-    'llama3.1-8b',
     'qwen-3-235b-a22b-instruct-2507',
     'gpt-oss-120b',
     'zai-glm-4.7',
+    'llama3.1-8b',
   ],
 };
 
@@ -227,6 +252,7 @@ export const DEFAULT_SETTINGS: ChatSettings = {
   anthropicThinkingEnabled: false,
   anthropicThinkingBudgetTokens: 1024,
   artifactsEnabled: true,
+  openaiReasoningEffort: 'medium',
 };
 
 export const PROJECT_COLORS = [
@@ -249,6 +275,23 @@ export interface TokenUsage {
   totalTokens: number;
   cachedTokens?: number;
   reasoningTokens?: number;
+}
+
+export interface ApiKeyValidationStatus {
+  valid: boolean;
+  lastChecked: number;
+  error?: string;
+}
+
+export interface UsageRecord {
+  provider: Provider;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  reasoningTokens: number;
+  timestamp: number;
+  conversationId?: string;
 }
 
 // Web Search Types

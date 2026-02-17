@@ -6,6 +6,58 @@ import { getBuiltinTools } from '@/lib/mcp/builtin-tools';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Extract a detailed error message from provider SDK errors.
+ * The OpenAI SDK (used by OpenAI, Mistral, Cerebras) throws APIError
+ * with status, error body, code, param, and type fields.
+ */
+function extractErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return 'Unknown error';
+
+  const parts: string[] = [];
+
+  // OpenAI SDK APIError has these extra fields
+  const apiErr = error as {
+    status?: number;
+    error?: unknown;
+    code?: string | null;
+    param?: string | null;
+    type?: string;
+    requestID?: string | null;
+  };
+
+  if (apiErr.status) {
+    parts.push(`[${apiErr.status}]`);
+  }
+
+  // Try to get a meaningful message from the error body
+  if (apiErr.error && typeof apiErr.error === 'object') {
+    const body = apiErr.error as Record<string, unknown>;
+    const msg = body.message || body.detail || body.error;
+    if (typeof msg === 'string') {
+      parts.push(msg);
+    } else if (msg && typeof msg === 'object') {
+      const nested = (msg as Record<string, unknown>).message;
+      if (typeof nested === 'string') {
+        parts.push(nested);
+      } else {
+        parts.push(JSON.stringify(msg));
+      }
+    } else {
+      // Stringify the whole body for debugging
+      parts.push(JSON.stringify(apiErr.error));
+    }
+  } else if (error.message) {
+    parts.push(error.message);
+  }
+
+  if (apiErr.code) parts.push(`(code: ${apiErr.code})`);
+  if (apiErr.param) parts.push(`(param: ${apiErr.param})`);
+  if (apiErr.type) parts.push(`(type: ${apiErr.type})`);
+
+  return parts.join(' ') || error.message || 'Unknown error';
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -103,7 +155,8 @@ export async function POST(request: NextRequest) {
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          const errorMessage = extractErrorMessage(error);
+          console.error('[chat/route] Stream error:', errorMessage, error);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`));
           controller.close();
         }
@@ -118,7 +171,8 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = extractErrorMessage(error);
+    console.error('[chat/route] Request error:', errorMessage, error);
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

@@ -12,6 +12,7 @@ import {
   generateId,
   generateTitle,
   getProjects,
+  addUsageRecord,
 } from '@/lib/storage';
 import { mergeSystemPrompts, buildArtifactSystemPrompt, isArtifactTool } from '@/lib/providers';
 import { processStreamingChunk } from '@/lib/artifact-parser';
@@ -229,10 +230,14 @@ export function Chat() {
   }, [settings.theme, setTheme]);
 
   const handleProviderChange = useCallback((provider: Provider) => {
+    const allModels = [
+      ...DEFAULT_MODELS[provider],
+      ...(settings.customModels?.[provider] || []),
+    ];
     const newSettings = {
       ...settings,
       provider,
-      model: DEFAULT_MODELS[provider][0],
+      model: allModels[0],
     };
     saveSettings(newSettings);
     setSettings(newSettings);
@@ -538,6 +543,20 @@ export function Chat() {
                 cachedTokens: (prev.cachedTokens || 0) + (usage.cachedTokens || 0) || undefined,
                 reasoningTokens: (prev.reasoningTokens || 0) + (usage.reasoningTokens || 0) || undefined,
               }));
+              // Record usage for cost tracking
+              const currentProject = conv.projectId
+                ? projects.find(p => p.id === conv.projectId)
+                : undefined;
+              addUsageRecord({
+                provider: (currentProject?.provider || settings.provider) as Provider,
+                model: currentProject?.model || settings.model,
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+                cacheReadTokens: usage.cachedTokens || 0,
+                reasoningTokens: usage.reasoningTokens || 0,
+                timestamp: Date.now(),
+                conversationId: conv.id,
+              });
             }
             // Handle single tool call
             if (parsed.tool_call) {
@@ -1295,7 +1314,7 @@ export function Chat() {
           </div>
           {!currentProjectId && !showKnowledgeBase && !showModelsConfig && !showConnectorsConfig && (
             <div className="flex items-center gap-4">
-              <TokenUsageDisplay usage={lastUsage} sessionUsage={sessionUsage} />
+              <TokenUsageDisplay usage={lastUsage} sessionUsage={sessionUsage} model={settings.model} />
               <div className="flex items-center gap-2">
                 <select
                   value={settings.provider}
@@ -1313,7 +1332,10 @@ export function Chat() {
                   onChange={(e) => handleModelChange(e.target.value)}
                   className="text-sm px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--background)] max-w-[180px]"
                 >
-                  {DEFAULT_MODELS[settings.provider].map((model) => (
+                  {[
+                    ...DEFAULT_MODELS[settings.provider],
+                    ...(settings.customModels?.[settings.provider] || []),
+                  ].map((model) => (
                     <option key={model} value={model}>
                       {model}
                     </option>

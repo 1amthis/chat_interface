@@ -29,7 +29,9 @@ export async function* streamAnthropic(
   thinkingEnabled?: boolean,
   thinkingBudgetTokens?: number,
   ragEnabled?: boolean,
-  artifactsEnabled?: boolean
+  artifactsEnabled?: boolean,
+  temperature?: number,
+  maxOutputTokens?: number
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Anthropic API key is required');
 
@@ -120,10 +122,15 @@ export async function* streamAnthropic(
   // Create request options
   const requestOptions: Anthropic.MessageStreamParams = {
     model,
-    max_tokens: 8192, // Increased for complex tool use workflows
+    max_tokens: maxOutputTokens || 8192, // Increased for complex tool use workflows
     system: systemPrompt || undefined,
     messages: anthropicMessages,
   };
+
+  // Anthropic temperature range is 0-1
+  if (temperature !== undefined) {
+    requestOptions.temperature = Math.min(Math.max(temperature, 0), 1);
+  }
 
   // If we are replaying a tool-use assistant turn, we can only keep thinking enabled
   // if the signed thinking block was provided (Anthropic requires it before tool_use).

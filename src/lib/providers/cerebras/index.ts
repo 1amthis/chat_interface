@@ -32,7 +32,9 @@ export async function* streamCerebras(
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
   ragEnabled?: boolean,
-  artifactsEnabled?: boolean
+  artifactsEnabled?: boolean,
+  temperature?: number,
+  maxOutputTokens?: number
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Cerebras API key is required');
 
@@ -84,6 +86,13 @@ export async function* streamCerebras(
     messages: allMessages,
     stream: true,
   };
+
+  if (temperature !== undefined) {
+    requestOptions.temperature = temperature;
+  }
+  if (maxOutputTokens !== undefined) {
+    requestOptions.max_tokens = maxOutputTokens;
+  }
 
   // Build tools array based on enabled features
   const tools: OpenAI.ChatCompletionTool[] = [];

@@ -250,7 +250,11 @@ export function useToolExecution({
       setSearchStatus(`Searching memory: "${query}"`);
 
       const results = await searchMemory(query, {
-        limit: 5,
+        limit: settings.memorySearchLimit ?? 5,
+        minScore: settings.memorySearchMinScore ?? 0.1,
+        snippetLength: settings.memorySearchSnippetLength ?? 150,
+        k1: settings.bm25K1 ?? 1.2,
+        b: settings.bm25B ?? 0.75,
         excludeConversationId,
       });
 
@@ -265,7 +269,7 @@ export function useToolExecution({
       setSearchStatus(null);
       return null;
     }
-  }, []);
+  }, [settings.memorySearchLimit, settings.memorySearchMinScore, settings.memorySearchSnippetLength, settings.bm25K1, settings.bm25B]);
 
   // Perform RAG search across uploaded documents
   const performRAGSearch = useCallback(async (
@@ -281,7 +285,10 @@ export function useToolExecution({
 
       setSearchStatus(`Searching documents: "${query}"`);
 
-      const results = await searchRAG(query, settings.openaiKey, { limit: 5 });
+      const results = await searchRAG(query, settings.openaiKey, {
+        limit: settings.ragSearchLimit ?? 5,
+        minScore: settings.ragSearchMinScore ?? 0.3,
+      });
 
       setSearchStatus(null);
 
@@ -294,7 +301,7 @@ export function useToolExecution({
       setSearchStatus(null);
       return null;
     }
-  }, [settings.openaiKey]);
+  }, [settings.openaiKey, settings.ragSearchLimit, settings.ragSearchMinScore]);
 
   // Execute artifact tool calls client-side (no API call needed)
   const performArtifactToolCall = useCallback((

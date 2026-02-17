@@ -92,6 +92,26 @@ export async function getAllDocuments(): Promise<RAGDocument[]> {
 }
 
 /**
+ * Get chunks for a specific document, sorted by position
+ */
+export async function getChunksByDocumentId(documentId: string): Promise<RAGChunk[]> {
+  const db = await openDatabase();
+  const tx = db.transaction(STORES.CHUNKS, 'readonly');
+  const index = tx.objectStore(STORES.CHUNKS).index('documentId');
+  const range = IDBKeyRange.only(documentId);
+
+  return new Promise((resolve, reject) => {
+    const request = index.getAll(range);
+    request.onsuccess = () => {
+      const chunks = request.result as RAGChunk[];
+      chunks.sort((a, b) => a.position - b.position);
+      resolve(chunks);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
  * Get all stored chunks
  */
 export async function getAllChunks(): Promise<RAGChunk[]> {

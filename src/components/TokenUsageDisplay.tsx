@@ -1,10 +1,12 @@
 'use client';
 
 import { TokenUsage } from '@/types';
+import { calculateCost } from '@/lib/model-metadata';
 
 interface TokenUsageDisplayProps {
   usage: TokenUsage | null;
   sessionUsage: TokenUsage;
+  model?: string;
 }
 
 function formatNumber(num: number): string {
@@ -17,7 +19,12 @@ function formatNumber(num: number): string {
   return num.toString();
 }
 
-export function TokenUsageDisplay({ usage, sessionUsage }: TokenUsageDisplayProps) {
+export function TokenUsageDisplay({ usage, sessionUsage, model }: TokenUsageDisplayProps) {
+  // Calculate session cost if model is provided
+  const sessionCost = model
+    ? calculateCost(model, sessionUsage.inputTokens, sessionUsage.outputTokens, sessionUsage.cachedTokens)
+    : null;
+
   return (
     <div className="flex items-center gap-4 text-xs text-gray-500">
       {/* Last message usage */}
@@ -52,6 +59,11 @@ export function TokenUsageDisplay({ usage, sessionUsage }: TokenUsageDisplayProp
           </svg>
           <span title={`Input: ${sessionUsage.inputTokens.toLocaleString()} | Output: ${sessionUsage.outputTokens.toLocaleString()}`}>
             Total: <span className="font-medium">{formatNumber(sessionUsage.totalTokens)}</span>
+            {sessionCost !== null && (
+              <span className="ml-1 text-amber-600 dark:text-amber-400" title="Estimated session cost">
+                Est: ${sessionCost < 0.01 ? '<0.01' : sessionCost.toFixed(2)}
+              </span>
+            )}
           </span>
         </div>
       )}

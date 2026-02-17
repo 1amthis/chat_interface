@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { RAGDocument, RAGUploadProgress } from '@/lib/rag/types';
-import { uploadDocument, removeDocument, listDocuments, clearRAGStore } from '@/lib/rag';
+import { uploadDocument, removeDocument, listDocuments, clearRAGStore, getDocumentChunks } from '@/lib/rag';
+import type { RAGChunk } from '@/lib/rag';
 import type { ChunkStrategy } from '@/lib/rag/chunker';
 
 const ACCEPTED_EXTENSIONS = [
@@ -45,6 +46,12 @@ export function RAGSettingsSection({
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Chunk inspector state
+  const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
+  const [docChunks, setDocChunks] = useState<Map<string, RAGChunk[]>>(new Map());
+  const [loadingChunks, setLoadingChunks] = useState<string | null>(null);
+  const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set());
+
   const loadDocuments = useCallback(async () => {
     try {
       const docs = await listDocuments();
@@ -57,6 +64,40 @@ export function RAGSettingsSection({
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
+
+  const handleToggleExpand = useCallback(async (docId: string) => {
+    if (expandedDocId === docId) {
+      setExpandedDocId(null);
+      return;
+    }
+    setExpandedDocId(docId);
+    setExpandedChunks(new Set());
+
+    // Lazy-load chunks if not cached
+    if (!docChunks.has(docId)) {
+      setLoadingChunks(docId);
+      try {
+        const chunks = await getDocumentChunks(docId);
+        setDocChunks((prev) => new Map(prev).set(docId, chunks));
+      } catch (e) {
+        console.error('Failed to load chunks:', e);
+      } finally {
+        setLoadingChunks(null);
+      }
+    }
+  }, [expandedDocId, docChunks]);
+
+  const toggleChunkExpanded = useCallback((chunkId: string) => {
+    setExpandedChunks((prev) => {
+      const next = new Set(prev);
+      if (next.has(chunkId)) {
+        next.delete(chunkId);
+      } else {
+        next.add(chunkId);
+      }
+      return next;
+    });
+  }, []);
 
   const handleUpload = useCallback(async (files: FileList | File[]) => {
     if (!openaiKey) {
@@ -87,16 +128,24 @@ export function RAGSettingsSection({
   const handleDelete = useCallback(async (docId: string) => {
     try {
       await removeDocument(docId);
+      if (expandedDocId === docId) setExpandedDocId(null);
+      setDocChunks((prev) => {
+        const next = new Map(prev);
+        next.delete(docId);
+        return next;
+      });
       await loadDocuments();
     } catch (e) {
       console.error('Failed to delete document:', e);
     }
-  }, [loadDocuments]);
+  }, [loadDocuments, expandedDocId]);
 
   const handleClearAll = useCallback(async () => {
     try {
       await clearRAGStore();
       setDocuments([]);
+      setExpandedDocId(null);
+      setDocChunks(new Map());
     } catch (e) {
       console.error('Failed to clear RAG store:', e);
     }
@@ -128,7 +177,7 @@ export function RAGSettingsSection({
     return (
       <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
         <p className="text-xs text-yellow-700 dark:text-yellow-300">
-          Document search requires an OpenAI API key (for embeddings). Set your OpenAI API key in the provider settings above.
+          Document search requires an OpenAI API key (for embeddings). Set your OpenAI API key in Models & Providers.
         </p>
       </div>
     );
@@ -248,7 +297,7 @@ export function RAGSettingsSection({
         </div>
       )}
 
-      {/* Document list */}
+      {/* Document list with chunk inspector */}
       {documents.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -260,29 +309,96 @@ export function RAGSettingsSection({
               Clear All
             </button>
           </div>
-          <div className="space-y-1 max-h-48 overflow-y-auto">
-            {documents.map((doc) => (
-              <div
-                key={doc.id}
-                className="flex items-center justify-between p-2 rounded-lg bg-[var(--border-color)]/30 group"
-              >
-                <div className="flex-1 min-w-0 mr-2">
-                  <p className="text-sm truncate">{doc.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {formatSize(doc.size)} &middot; {doc.chunkCount} chunk{doc.chunkCount !== 1 ? 's' : ''} &middot; {new Date(doc.createdAt).toLocaleDateString()}
-                  </p>
+          <div className="space-y-1 max-h-96 overflow-y-auto">
+            {documents.map((doc) => {
+              const isExpanded = expandedDocId === doc.id;
+              const chunks = docChunks.get(doc.id);
+              const isLoading = loadingChunks === doc.id;
+
+              return (
+                <div key={doc.id}>
+                  <div
+                    className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors group ${
+                      isExpanded ? 'bg-[var(--border-color)]/50' : 'bg-[var(--border-color)]/30 hover:bg-[var(--border-color)]/40'
+                    }`}
+                    onClick={() => handleToggleExpand(doc.id)}
+                  >
+                    <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                      <svg
+                        className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate">{doc.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {formatSize(doc.size)} &middot; {doc.chunkCount} chunk{doc.chunkCount !== 1 ? 's' : ''} &middot; {new Date(doc.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDelete(doc.id); }}
+                      className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Remove document"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Chunk inspector panel */}
+                  {isExpanded && (
+                    <div className="ml-5 mt-1 mb-2 pl-3 border-l-2 border-[var(--border-color)] space-y-1.5">
+                      {isLoading ? (
+                        <div className="flex items-center gap-2 py-2">
+                          <svg className="animate-spin h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          <span className="text-xs text-gray-400">Loading chunks...</span>
+                        </div>
+                      ) : chunks && chunks.length > 0 ? (
+                        chunks.map((chunk) => {
+                          const isChunkExpanded = expandedChunks.has(chunk.id);
+                          return (
+                            <div
+                              key={chunk.id}
+                              className="p-2 rounded bg-[var(--border-color)]/20 border border-[var(--border-color)]"
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                                    Chunk {chunk.position + 1}
+                                  </span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-mono">
+                                    {chunk.embedding.length}d
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() => toggleChunkExpanded(chunk.id)}
+                                  className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline"
+                                >
+                                  {isChunkExpanded ? 'Show less' : 'Show full'}
+                                </button>
+                              </div>
+                              <p className={`text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap ${
+                                isChunkExpanded ? '' : 'line-clamp-3'
+                              }`}>
+                                {chunk.content}
+                              </p>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <p className="text-xs text-gray-400 py-2">No chunks found</p>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => handleDelete(doc.id)}
-                  className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                  title="Remove document"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

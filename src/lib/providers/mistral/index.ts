@@ -32,7 +32,9 @@ export async function* streamMistral(
   mcpTools?: UnifiedTool[],
   toolExecutions?: ToolExecutionResult[],
   ragEnabled?: boolean,
-  artifactsEnabled?: boolean
+  artifactsEnabled?: boolean,
+  temperature?: number,
+  maxOutputTokens?: number
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Mistral API key is required');
 
@@ -66,7 +68,7 @@ export async function* streamMistral(
 
     allMessages.push({
       role: 'assistant',
-      content: null,
+      content: '',  // Mistral requires empty string, not null
       tool_calls: toolCallsForAssistant,
     });
 
@@ -74,7 +76,7 @@ export async function* streamMistral(
       allMessages.push({
         role: 'tool',
         tool_call_id: te.toolCallId,
-        content: te.result,
+        content: typeof te.result === 'string' ? te.result : JSON.stringify(te.result),
       });
     }
   }
@@ -84,6 +86,13 @@ export async function* streamMistral(
     messages: allMessages,
     stream: true,
   };
+
+  if (temperature !== undefined) {
+    requestOptions.temperature = temperature;
+  }
+  if (maxOutputTokens !== undefined) {
+    requestOptions.max_tokens = maxOutputTokens;
+  }
 
   // Build tools array based on enabled features
   const tools: OpenAI.ChatCompletionTool[] = [];
@@ -141,9 +150,38 @@ export async function* streamMistral(
       }
     }
 
-    const content = delta?.content;
-    if (content) {
-      yield { type: 'content', content };
+    // Magistral models return content as an array of structured blocks:
+    //   [{type: 'thinking', thinking: [{type: 'text', text: '...'}]}, {type: 'text', text: '...'}]
+    // Regular Mistral models return content as a plain string.
+    const rawContent = delta?.content;
+    if (rawContent) {
+      if (typeof rawContent === 'string') {
+        yield { type: 'content', content: rawContent };
+      } else if (Array.isArray(rawContent)) {
+        for (const block of rawContent as Array<Record<string, unknown>>) {
+          if (block.type === 'text' && typeof block.text === 'string') {
+            yield { type: 'content', content: block.text };
+          } else if (block.type === 'thinking') {
+            // thinking field can be a string or an array of text blocks
+            const thinking = block.thinking;
+            if (typeof thinking === 'string') {
+              yield { type: 'reasoning', reasoning: thinking };
+            } else if (Array.isArray(thinking)) {
+              for (const t of thinking as Array<Record<string, unknown>>) {
+                if (typeof t.text === 'string') {
+                  yield { type: 'reasoning', reasoning: t.text };
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Magistral may also send reasoning_content as a separate field
+    const deltaAny = delta as unknown as Record<string, unknown> | undefined;
+    if (deltaAny?.reasoning_content && typeof deltaAny.reasoning_content === 'string') {
+      yield { type: 'reasoning', reasoning: deltaAny.reasoning_content };
     }
 
     // Check for finish reason
