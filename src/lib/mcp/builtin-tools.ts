@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import * as path from 'path';
 import * as dns from 'dns';
 import * as net from 'net';
+import { parse as parseHtml, Node, HTMLElement as NHTMLElement } from 'node-html-parser';
 import type { UnifiedTool, BuiltinToolsConfig } from '@/types';
 import type { MCPCallToolResult } from './types';
 
@@ -354,181 +355,99 @@ export async function filesystemList(
 
 // HTML cleaning helpers for fetch_url
 
-/** Extract <title> text from HTML */
-function extractTitle(html: string): string | null {
-  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  return match ? match[1].trim() : null;
-}
+const NOISE_TAGS = ['script', 'style', 'noscript', 'svg', 'nav', 'footer', 'aside', 'iframe', 'form', 'select'];
+const NOISE_TAGS_ISOLATED = [...NOISE_TAGS, 'header'];
 
-/** Extract the main content region from HTML */
-function extractMainContent(html: string): { content: string; isolated: boolean } {
-  // Try <main> first
-  const mainMatch = html.match(/<main[\s>][\s\S]*?<\/main>/i);
-  if (mainMatch) return { content: mainMatch[0], isolated: true };
-
-  // Try <article> (use the longest one as a heuristic for "largest")
-  const articleMatches = html.match(/<article[\s>][\s\S]*?<\/article>/gi);
-  if (articleMatches && articleMatches.length > 0) {
-    const longest = articleMatches.reduce((a, b) => (a.length >= b.length ? a : b));
-    return { content: longest, isolated: true };
+/** Convert a node-html-parser subtree to Markdown text */
+function nodeToMarkdown(node: Node): string {
+  // Text node
+  if (node.nodeType === 3) {
+    return node.rawText;
   }
 
-  // Try <div role="main">
-  const roleMainMatch = html.match(/<div[^>]+role\s*=\s*["']main["'][^>]*>[\s\S]*?<\/div>/i);
-  if (roleMainMatch) return { content: roleMainMatch[0], isolated: true };
+  const el = node as NHTMLElement;
+  const tag = (el.rawTagName || '').toLowerCase();
+  const children = () => el.childNodes.map(nodeToMarkdown).join('');
 
-  // Try <body>
-  const bodyMatch = html.match(/<body[\s>][\s\S]*?<\/body>/i);
-  if (bodyMatch) return { content: bodyMatch[0], isolated: false };
-
-  return { content: html, isolated: false };
-}
-
-/** Remove noise elements and their content */
-function removeNoiseTags(html: string, isolated: boolean): string {
-  const alwaysRemove = ['script', 'style', 'noscript', 'svg', 'nav', 'footer', 'aside', 'iframe', 'form', 'select'];
-  const tags = isolated ? [...alwaysRemove, 'header'] : alwaysRemove;
-  let result = html;
-  for (const tag of tags) {
-    result = result.replace(new RegExp(`<${tag}[\\s>][\\s\\S]*?<\\/${tag}>`, 'gi'), '');
-    // Also remove self-closing variants
-    result = result.replace(new RegExp(`<${tag}[^>]*\\/?>`, 'gi'), '');
-  }
-  // Remove HTML comments
-  result = result.replace(/<!--[\s\S]*?-->/g, '');
-  return result;
-}
-
-/** Convert structural HTML elements to plain text equivalents */
-function convertStructuralElements(html: string): string {
-  let text = html;
-
-  // Convert headings to markdown-style
-  for (let i = 1; i <= 6; i++) {
-    const prefix = '#'.repeat(i);
-    text = text.replace(
-      new RegExp(`<h${i}[^>]*>([\\s\\S]*?)<\\/h${i}>`, 'gi'),
-      (_, content) => `\n\n${prefix} ${content.trim()}\n\n`
-    );
+  // Headings
+  const headingLevel = tag.match(/^h([1-6])$/);
+  if (headingLevel) {
+    const prefix = '#'.repeat(Number(headingLevel[1]));
+    return `\n\n${prefix} ${children().trim()}\n\n`;
   }
 
-  // Convert <pre> to fenced code blocks
-  text = text.replace(
-    /<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi,
-    (_, content) => `\n\n\`\`\`\n${content}\n\`\`\`\n\n`
-  );
-  text = text.replace(
-    /<pre[^>]*>([\s\S]*?)<\/pre>/gi,
-    (_, content) => `\n\n\`\`\`\n${content}\n\`\`\`\n\n`
-  );
-
-  // Convert inline code
-  text = text.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`');
-
-  // Convert bold/strong
-  text = text.replace(/<(?:b|strong)[^>]*>([\s\S]*?)<\/(?:b|strong)>/gi, '**$1**');
-
-  // Convert italic/em
-  text = text.replace(/<(?:i|em)[^>]*>([\s\S]*?)<\/(?:i|em)>/gi, '*$1*');
-
-  // Convert links: <a href="url">text</a> -> text (url)
-  text = text.replace(
-    /<a[^>]+href\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
-    (_, href, linkText) => {
-      const cleanText = linkText.trim();
-      if (!href || href.startsWith('#') || href.startsWith('javascript:')) {
-        return cleanText;
-      }
-      return cleanText === href ? href : `${cleanText} (${href})`;
+  switch (tag) {
+    case 'pre': {
+      const codeNode = el.querySelector('code');
+      const content = codeNode ? codeNode.innerText : el.innerText;
+      return `\n\n\`\`\`\n${content}\n\`\`\`\n\n`;
     }
-  );
-
-  // Convert table cells
-  text = text.replace(/<\/th>\s*<th[^>]*>/gi, ' | ');
-  text = text.replace(/<\/td>\s*<td[^>]*>/gi, ' | ');
-  text = text.replace(/<tr[^>]*>/gi, '\n');
-  text = text.replace(/<\/tr>/gi, '');
-
-  // Convert list items
-  text = text.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, content) => `\n- ${content.trim()}`);
-
-  // Convert paragraphs and line breaks
-  text = text.replace(/<p[^>]*>/gi, '\n\n');
-  text = text.replace(/<\/p>/gi, '');
-  text = text.replace(/<br\s*\/?>/gi, '\n');
-  text = text.replace(/<hr\s*\/?>/gi, '\n---\n');
-
-  // Convert blockquotes
-  text = text.replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, content) => {
-    return content.trim().split('\n').map((line: string) => `> ${line}`).join('\n');
-  });
-
-  return text;
+    case 'code':
+      return `\`${el.innerText}\``;
+    case 'b':
+    case 'strong':
+      return `**${children().trim()}**`;
+    case 'i':
+    case 'em':
+      return `*${children().trim()}*`;
+    case 'a': {
+      const href = el.getAttribute('href') || '';
+      const text = children().trim();
+      if (!href || href.startsWith('#') || href.startsWith('javascript:')) return text;
+      return text === href ? href : `${text} (${href})`;
+    }
+    case 'li':
+      return `\n- ${children().trim()}`;
+    case 'p':
+      return `\n\n${children().trim()}\n\n`;
+    case 'br':
+      return '\n';
+    case 'hr':
+      return '\n---\n';
+    case 'blockquote':
+      return children().trim().split('\n').map((l: string) => `> ${l}`).join('\n');
+    case 'tr':
+      return `\n${children()}`;
+    case 'td':
+    case 'th':
+      return `${children().trim()} | `;
+    default:
+      return children();
+  }
 }
 
-/** Decode common HTML entities */
-function decodeHtmlEntities(text: string): string {
-  const entities: Record<string, string> = {
-    '&amp;': '&',
-    '&lt;': '<',
-    '&gt;': '>',
-    '&quot;': '"',
-    '&#39;': "'",
-    '&apos;': "'",
-    '&nbsp;': ' ',
-    '&ndash;': '\u2013',
-    '&mdash;': '\u2014',
-    '&lsquo;': '\u2018',
-    '&rsquo;': '\u2019',
-    '&ldquo;': '\u201C',
-    '&rdquo;': '\u201D',
-    '&bull;': '\u2022',
-    '&hellip;': '\u2026',
-    '&copy;': '\u00A9',
-    '&reg;': '\u00AE',
-    '&trade;': '\u2122',
-  };
+/** Clean HTML to readable Markdown using node-html-parser */
+function cleanHtml(html: string): { title: string | null; content: string } {
+  const root = parseHtml(html, { blockTextElements: { pre: true } });
 
-  let result = text;
-  for (const [entity, char] of Object.entries(entities)) {
-    result = result.split(entity).join(char);
+  const title = root.querySelector('title')?.innerText?.trim() ?? null;
+
+  // Find main content region (first match wins)
+  const contentRoot =
+    root.querySelector('main') ??
+    root.querySelector('article') ??
+    root.querySelector('[role="main"]') ??
+    root.querySelector('body') ??
+    root;
+
+  const isolated = contentRoot !== root && contentRoot.rawTagName !== 'body';
+
+  // Remove noise tags in-place
+  const noiseTags = isolated ? NOISE_TAGS_ISOLATED : NOISE_TAGS;
+  for (const tag of noiseTags) {
+    contentRoot.querySelectorAll(tag).forEach(el => el.remove());
   }
 
-  // Decode numeric entities: &#123; and &#x1A;
-  result = result.replace(/&#(\d+);/g, (_, num) => {
-    const code = parseInt(num, 10);
-    return code > 0 && code < 0x10FFFF ? String.fromCodePoint(code) : '';
-  });
-  result = result.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
-    const code = parseInt(hex, 16);
-    return code > 0 && code < 0x10FFFF ? String.fromCodePoint(code) : '';
-  });
+  const markdown = nodeToMarkdown(contentRoot);
 
-  return result;
-}
+  // Normalize whitespace
+  let content = markdown
+    .replace(/[^\S\n]+/g, ' ')
+    .split('\n').map((l: string) => l.trim()).join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 
-/** Collapse whitespace and limit consecutive newlines */
-function normalizeWhitespace(text: string): string {
-  // Strip all remaining HTML tags
-  let result = text.replace(/<[^>]+>/g, '');
-  // Collapse runs of spaces/tabs (but not newlines)
-  result = result.replace(/[^\S\n]+/g, ' ');
-  // Trim each line
-  result = result.split('\n').map(line => line.trim()).join('\n');
-  // Limit consecutive newlines to 2
-  result = result.replace(/\n{3,}/g, '\n\n');
-  return result.trim();
-}
-
-/** Clean HTML to readable plain text */
-function cleanHtml(html: string): { title: string | null; content: string } {
-  const title = extractTitle(html);
-  const { content: mainContent, isolated } = extractMainContent(html);
-  const stripped = removeNoiseTags(mainContent, isolated);
-  const converted = convertStructuralElements(stripped);
-  const decoded = decodeHtmlEntities(converted);
-  const normalized = normalizeWhitespace(decoded);
-  return { title, content: normalized };
+  return { title, content };
 }
 
 /** Content types that indicate binary data */
@@ -538,9 +457,13 @@ const BINARY_CONTENT_TYPES = [
   'font/', 'application/x-tar',
 ];
 
+const FETCH_TIMEOUT_MS = 15_000;
+const FETCH_MAX_SIZE = 5_000; // default page size (model can paginate with start_index)
+
 export async function fetchUrl(
   url: string,
-  config: BuiltinToolsConfig
+  config: BuiltinToolsConfig,
+  options: { startIndex?: number; maxLength?: number; raw?: boolean } = {}
 ): Promise<MCPCallToolResult> {
   const fetchConfig = config.fetch;
 
@@ -555,24 +478,14 @@ export async function fetchUrl(
   const urlValidation = await validateUrl(url);
   if (!urlValidation.valid) {
     return {
-      content: [
-        {
-          type: 'text',
-          text: `URL blocked: ${urlValidation.error}`,
-        },
-      ],
+      content: [{ type: 'text', text: `URL blocked: ${urlValidation.error}` }],
       isError: true,
     };
   }
 
   if (!isDomainAllowed(url, fetchConfig.allowedDomains || [])) {
     return {
-      content: [
-        {
-          type: 'text',
-          text: `Access denied: ${url} is not in the allowed domains`,
-        },
-      ],
+      content: [{ type: 'text', text: `Access denied: ${url} is not in the allowed domains` }],
       isError: true,
     };
   }
@@ -590,15 +503,15 @@ export async function fetchUrl(
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
         redirect: 'manual',
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
 
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location');
-        if (!location) break; // No location header, stop redirecting
+        if (!location) break;
 
         const redirectUrl = new URL(location, currentUrl).href;
 
-        // Validate redirect URL for SSRF
         const redirectValidation = await validateUrl(redirectUrl);
         if (!redirectValidation.valid) {
           return {
@@ -607,7 +520,6 @@ export async function fetchUrl(
           };
         }
 
-        // Also check redirect against domain allowlist
         if (!isDomainAllowed(redirectUrl, fetchConfig.allowedDomains || [])) {
           return {
             content: [{ type: 'text', text: `Redirect to different domain blocked: ${location}` }],
@@ -619,7 +531,7 @@ export async function fetchUrl(
         continue;
       }
 
-      break; // Not a redirect, we're done
+      break;
     }
 
     if (!response) {
@@ -646,7 +558,6 @@ export async function fetchUrl(
 
     const rawText = await response.text();
 
-    // Detect content type
     const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml');
     const isJson = contentType.includes('application/json') || contentType.includes('+json');
     const looksLikeHtml = !isHtml && /^\s*<!doctype\s+html|^\s*<html[\s>]/i.test(rawText.slice(0, 500));
@@ -655,15 +566,16 @@ export async function fetchUrl(
     let title: string | null = null;
     let contentTypeLabel: string;
 
-    if (isHtml || looksLikeHtml) {
-      // Cap raw HTML at 5MB before running regexes
-      const htmlToProcess = rawText.length > 5_000_000 ? rawText.slice(0, 5_000_000) : rawText;
-      const cleaned = cleanHtml(htmlToProcess);
+    if (options.raw) {
+      // Raw mode: return content as-is without any HTML cleaning
+      processedContent = rawText;
+      contentTypeLabel = contentType || 'unknown';
+    } else if (isHtml || looksLikeHtml) {
+      const cleaned = cleanHtml(rawText);
       title = cleaned.title;
       processedContent = cleaned.content;
       contentTypeLabel = 'HTML (cleaned)';
 
-      // SPA fallback: if cleaned content is essentially empty
       if (processedContent.length < 50) {
         processedContent = 'Page content appears to be dynamically rendered via JavaScript and could not be extracted.';
       }
@@ -680,30 +592,30 @@ export async function fetchUrl(
       processedContent = rawText;
     }
 
-    // Limit processed content size
-    const maxSize = 100_000; // 100KB
-    if (processedContent.length > maxSize) {
-      processedContent = processedContent.slice(0, maxSize) + '\n...(truncated)';
-    }
+    // Apply pagination
+    const startIndex = options.startIndex ?? 0;
+    const maxLength = options.maxLength ?? FETCH_MAX_SIZE;
+    const totalLength = processedContent.length;
+    const page = processedContent.slice(startIndex, startIndex + maxLength);
+    const hasMore = startIndex + maxLength < totalLength;
 
     // Build structured response
     const parts = [`URL: ${currentUrl}`, `Status: ${response.status}`];
     if (title) parts.push(`Title: ${title}`);
     parts.push(`Content-Type: ${contentTypeLabel}`);
-    parts.push('', processedContent);
+    if (totalLength > maxLength) {
+      parts.push(`Characters: ${startIndex + 1}-${startIndex + page.length} of ${totalLength}${hasMore ? ' (use start_index to read more)' : ''}`);
+    }
+    parts.push('', page);
 
     return {
       content: [{ type: 'text', text: parts.join('\n') }],
       isError: !response.ok,
     };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     return {
-      content: [
-        {
-          type: 'text',
-          text: `Error fetching URL: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
+      content: [{ type: 'text', text: `Error fetching URL: ${msg}` }],
       isError: true,
     };
   }
@@ -805,13 +717,25 @@ export function getBuiltinTools(config: BuiltinToolsConfig): UnifiedTool[] {
     tools.push({
       source: 'builtin',
       name: 'fetch_url',
-      description: 'Fetch a URL and extract its readable content. HTML pages are automatically cleaned to plain text with scripts, styles, and navigation removed. JSON responses are pretty-printed.',
+      description: 'Fetch a URL and extract its readable content. HTML pages are cleaned to Markdown with noise (scripts, styles, nav) removed. JSON responses are pretty-printed. For large pages use start_index to read in chunks.',
       parameters: {
         type: 'object',
         properties: {
           url: {
             type: 'string',
             description: 'The URL to fetch',
+          },
+          start_index: {
+            type: 'number',
+            description: 'Character offset to start reading from (default: 0). Use to paginate through large pages.',
+          },
+          max_length: {
+            type: 'number',
+            description: `Maximum number of characters to return (default: ${FETCH_MAX_SIZE}). Reduce for faster responses.`,
+          },
+          raw: {
+            type: 'boolean',
+            description: 'If true, return raw content without HTML cleaning or JSON formatting.',
           },
         },
         required: ['url'],
@@ -876,7 +800,11 @@ export async function executeBuiltinTool(
           isError: true,
         };
       }
-      return fetchUrl(params.url, config);
+      return fetchUrl(params.url, config, {
+        startIndex: typeof params.start_index === 'number' ? params.start_index : undefined,
+        maxLength: typeof params.max_length === 'number' ? params.max_length : undefined,
+        raw: typeof params.raw === 'boolean' ? params.raw : undefined,
+      });
     }
 
     case 'shell_execute': {

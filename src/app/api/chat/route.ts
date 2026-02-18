@@ -1,8 +1,10 @@
 import { NextRequest } from 'next/server';
 import { streamChat, ChatMessage, ToolExecutionResult } from '@/lib/providers';
-import { ChatSettings, WebSearchResponse, GoogleDriveSearchResponse, UnifiedTool } from '@/types';
+import { ChatSettings, WebSearchResponse, GoogleDriveSearchResponse, UnifiedTool, ContextBreakdown, ContextBreakdownSection } from '@/types';
 import { mcpManager } from '@/lib/mcp/manager';
 import { getBuiltinTools } from '@/lib/mcp/builtin-tools';
+import { estimateTokens } from '@/lib/token-estimation';
+import { getModelMetadata } from '@/lib/model-metadata';
 
 export const dynamic = 'force-dynamic';
 
@@ -107,10 +109,131 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Build context breakdown for the client
+    const modelMeta = getModelMetadata(settings.model);
+    const contextWindowSize = modelMeta?.contextWindow || 128_000;
+
+    const sections: ContextBreakdownSection[] = [];
+    const sectionColors = {
+      system: '#3b82f6',   // blue
+      tools: '#8b5cf6',    // purple
+      messages: '#22c55e', // green
+      toolResults: '#f97316', // orange
+    };
+
+    // System prompt
+    const systemTokens = systemPrompt ? estimateTokens(systemPrompt) : 0;
+    if (systemTokens > 0) {
+      sections.push({
+        label: 'System Prompt',
+        estimatedTokens: systemTokens,
+        percentage: 0, // computed below
+        color: sectionColors.system,
+      });
+    }
+
+    // Tool definitions
+    const allTools = [...mcpTools];
+    // Count built-in search/drive/memory/rag/artifact tools that get added by providers
+    let builtinToolCount = 0;
+    if (webSearchEnabled) builtinToolCount++;
+    if (googleDriveEnabled) builtinToolCount++;
+    if (memorySearchEnabled) builtinToolCount++;
+    if (ragEnabled) builtinToolCount++;
+    if (artifactsEnabled) builtinToolCount += 3; // create, update, read
+    const toolDefsText = JSON.stringify(allTools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })));
+    const toolTokens = estimateTokens(toolDefsText) + (builtinToolCount * 150); // ~150 tokens per built-in tool
+    if (toolTokens > 0 && (allTools.length > 0 || builtinToolCount > 0)) {
+      sections.push({
+        label: 'Tool Definitions',
+        estimatedTokens: toolTokens,
+        percentage: 0,
+        color: sectionColors.tools,
+        details: [
+          ...(allTools.length > 0 ? [{ label: `MCP/Builtin tools (${allTools.length})`, estimatedTokens: estimateTokens(toolDefsText) }] : []),
+          ...(builtinToolCount > 0 ? [{ label: `Search/Artifact tools (${builtinToolCount})`, estimatedTokens: builtinToolCount * 150 }] : []),
+        ],
+      });
+    }
+
+    // Conversation messages
+    const messageDetails: { label: string; estimatedTokens: number }[] = [];
+    let totalMessageTokens = 0;
+    for (const msg of messages) {
+      const contentTokens = estimateTokens(msg.content || '');
+      const attachmentTokens = msg.attachments
+        ? msg.attachments.reduce((sum: number, a: { type: string; data?: string }) => {
+            // Images count ~85 tokens for low-detail, text attachments by content length
+            if (a.type === 'image') return sum + 85;
+            if (a.data) return sum + estimateTokens(a.data);
+            return sum;
+          }, 0)
+        : 0;
+      const msgTokens = contentTokens + attachmentTokens;
+      totalMessageTokens += msgTokens;
+      const roleLabel = msg.role === 'user' ? 'User' : 'Assistant';
+      const preview = (msg.content || '').slice(0, 40).replace(/\n/g, ' ');
+      messageDetails.push({
+        label: `${roleLabel}: ${preview}${(msg.content || '').length > 40 ? '...' : ''}`,
+        estimatedTokens: msgTokens,
+      });
+    }
+    if (totalMessageTokens > 0) {
+      sections.push({
+        label: 'Conversation Messages',
+        estimatedTokens: totalMessageTokens,
+        percentage: 0,
+        color: sectionColors.messages,
+        details: messageDetails,
+      });
+    }
+
+    // Tool execution results
+    let toolResultTokens = 0;
+    const toolResultDetails: { label: string; estimatedTokens: number }[] = [];
+    if (toolExecutions && toolExecutions.length > 0) {
+      for (const exec of toolExecutions) {
+        const resultStr = typeof exec.result === 'string' ? exec.result : JSON.stringify(exec.result);
+        const tokens = estimateTokens(resultStr);
+        toolResultTokens += tokens;
+        toolResultDetails.push({
+          label: `${exec.toolName} result`,
+          estimatedTokens: tokens,
+        });
+      }
+      sections.push({
+        label: 'Tool Results',
+        estimatedTokens: toolResultTokens,
+        percentage: 0,
+        color: sectionColors.toolResults,
+        details: toolResultDetails,
+      });
+    }
+
+    const totalEstimatedTokens = systemTokens + toolTokens + totalMessageTokens + toolResultTokens;
+
+    // Compute percentages
+    for (const section of sections) {
+      section.percentage = contextWindowSize > 0 ? (section.estimatedTokens / contextWindowSize) * 100 : 0;
+    }
+
+    const contextBreakdown: ContextBreakdown = {
+      sections,
+      totalEstimatedTokens,
+      contextWindowSize,
+      percentUsed: contextWindowSize > 0 ? (totalEstimatedTokens / contextWindowSize) * 100 : 0,
+      model: settings.model,
+    };
+
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // Emit context breakdown as the first event
+          controller.enqueue(encoder.encode(
+            `data: ${JSON.stringify({ context_breakdown: contextBreakdown })}\n\n`
+          ));
+
           for await (const chunk of streamChat(
             messages,
             settings,

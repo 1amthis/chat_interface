@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
-import { Project, Conversation, ProjectFile, Attachment } from '@/types';
+import { Project, Conversation, ProjectFile, Attachment, Provider } from '@/types';
 import { generateId } from '@/lib/storage';
 import { ChatInput } from './ChatInput';
 import {
@@ -29,6 +29,12 @@ interface ProjectDashboardProps {
   onToggleGoogleDrive?: () => void;
   googleDriveConnected?: boolean;
   onPickDriveFile?: () => void;
+  currentProvider: Provider;
+  currentModel: string;
+  onModelChange?: (model: string) => void;
+  onProviderChange?: (provider: Provider) => void;
+  availableModels?: string[];
+  customModels?: Partial<Record<Provider, string[]>>;
 }
 
 export function ProjectDashboard({
@@ -47,6 +53,12 @@ export function ProjectDashboard({
   onToggleGoogleDrive,
   googleDriveConnected,
   onPickDriveFile,
+  currentProvider,
+  currentModel,
+  onModelChange,
+  onProviderChange,
+  availableModels,
+  customModels,
 }: ProjectDashboardProps) {
   const [instructions, setInstructions] = useState(project.instructions || '');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | null>(null);
@@ -336,6 +348,12 @@ export function ProjectDashboard({
         onToggleGoogleDrive={onToggleGoogleDrive}
         googleDriveConnected={googleDriveConnected}
         onPickDriveFile={onPickDriveFile}
+        currentProvider={currentProvider}
+        currentModel={currentModel}
+        onModelChange={onModelChange}
+        onProviderChange={onProviderChange}
+        availableModels={availableModels}
+        customModels={customModels}
       />
 
       {/* Delete Confirmation Modal */}

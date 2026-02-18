@@ -1,5 +1,5 @@
 /**
- * Formatting utilities for file sizes, durations, and relative times
+ * Formatting utilities for file sizes, durations, numbers, and relative times
  */
 
 /**
@@ -16,6 +16,19 @@ export function formatFileSize(bytes: number): string {
  */
 export function formatDuration(ms: number): string {
   return (ms / 1000).toFixed(1) + 's';
+}
+
+/**
+ * Format a number with K/M suffixes (e.g., 1200 → "1.2K")
+ */
+export function formatNumber(num: number): string {
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(2) + 'M';
+  }
+  if (num >= 1000) {
+    return (num / 1000).toFixed(1) + 'K';
+  }
+  return num.toString();
 }
 
 /**
