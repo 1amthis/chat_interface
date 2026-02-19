@@ -108,8 +108,12 @@ export async function* streamCerebras(
   if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
     tools.push(openAIRAGSearchTool);
   }
+  // Add MCP/builtin tools (with per-tool call limit to prevent loops)
   if (mcpTools && mcpTools.length > 0) {
-    tools.push(...toOpenAITools(mcpTools));
+    const filteredMcpTools = mcpTools.filter(t => !toolCallLimitReached(t.name, toolExecutions));
+    if (filteredMcpTools.length > 0) {
+      tools.push(...toOpenAITools(filteredMcpTools));
+    }
   }
   // Artifact tools (enabled by default, can be toggled off)
   if (artifactsEnabled !== false) {
@@ -162,7 +166,7 @@ export async function* streamCerebras(
 
       for (const [, tc] of toolCalls) {
         try {
-          const args = JSON.parse(tc.args);
+          const args = tc.args.trim() ? JSON.parse(tc.args) : {};
           const parsed = parseToolName(tc.name);
 
           if (parsed.source === 'mcp') {

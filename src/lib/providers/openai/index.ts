@@ -123,9 +123,12 @@ export async function* streamOpenAI(
   if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
     tools.push(openAIRAGSearchTool);
   }
-  // Add MCP tools
+  // Add MCP/builtin tools (with per-tool call limit to prevent loops)
   if (mcpTools && mcpTools.length > 0) {
-    tools.push(...toOpenAITools(mcpTools));
+    const filteredMcpTools = mcpTools.filter(t => !toolCallLimitReached(t.name, toolExecutions));
+    if (filteredMcpTools.length > 0) {
+      tools.push(...toOpenAITools(filteredMcpTools));
+    }
   }
   // Artifact tools (enabled by default, can be toggled off)
   if (artifactsEnabled !== false) {
@@ -183,7 +186,7 @@ export async function* streamOpenAI(
 
       for (const [, tc] of toolCalls) {
         try {
-          const args = JSON.parse(tc.args);
+          const args = tc.args.trim() ? JSON.parse(tc.args) : {};
 
           // Parse tool name to determine source
           const parsed = parseToolName(tc.name);
@@ -326,13 +329,18 @@ function toResponsesAPITools(
     tools.push(toResponsesAPIRAGSearchTool());
   }
 
-  // Add MCP tools
+  // Add MCP/builtin tools
   if (mcpTools && mcpTools.length > 0) {
     for (const tool of mcpTools) {
-      // Create a namespaced tool name for MCP tools using __ delimiter
-      const toolName = tool.serverId
-        ? `mcp__${tool.serverId}__${tool.name}`
-        : `mcp__${tool.name}`;
+      // Create a namespaced tool name using __ delimiter
+      let toolName: string;
+      if (tool.source === 'builtin') {
+        toolName = `builtin__${tool.name}`;
+      } else if (tool.source === 'mcp' && tool.serverId) {
+        toolName = `mcp__${tool.serverId}__${tool.name}`;
+      } else {
+        toolName = tool.name;
+      }
       tools.push({
         type: 'function',
         name: toolName,
@@ -475,7 +483,7 @@ export async function* streamOpenAIResponses(
     webSearchEnabled && !searchResults && !toolCallLimitReached('web_search', toolExecutions),
     googleDriveEnabled && !driveSearchResults && !toolCallLimitReached('google_drive_search', toolExecutions),
     memorySearchEnabled && !toolCallLimitReached('memory_search', toolExecutions),
-    mcpTools,
+    mcpTools?.filter(t => !toolCallLimitReached(t.name, toolExecutions)),
     ragEnabled && !toolCallLimitReached('rag_search', toolExecutions),
     artifactsEnabled
   );

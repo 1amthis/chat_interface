@@ -165,9 +165,12 @@ export async function* streamAnthropic(
   if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
     tools.push(anthropicRAGSearchTool);
   }
-  // Add MCP tools
+  // Add MCP/builtin tools (with per-tool call limit to prevent loops)
   if (mcpTools && mcpTools.length > 0) {
-    tools.push(...toAnthropicTools(mcpTools));
+    const filteredMcpTools = mcpTools.filter(t => !toolCallLimitReached(t.name, toolExecutions));
+    if (filteredMcpTools.length > 0) {
+      tools.push(...toAnthropicTools(filteredMcpTools));
+    }
   }
   // Artifact tools (enabled by default, can be toggled off)
   if (artifactsEnabled !== false) {
@@ -215,7 +218,8 @@ export async function* streamAnthropic(
 
     if (event.type === 'content_block_stop' && currentToolName) {
       try {
-        const args = JSON.parse(currentToolInput);
+        // Default to empty object for tools with no required parameters (e.g. get_db_schema)
+        const args = currentToolInput.trim() ? JSON.parse(currentToolInput) : {};
 
         // Parse tool name to determine source
         const parsed = parseToolName(currentToolName);

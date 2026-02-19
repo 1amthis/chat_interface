@@ -101,12 +101,12 @@ export async function POST(request: NextRequest) {
       // Get available MCP tools
       const serverTools = await mcpManager.getAvailableTools();
       mcpTools.push(...serverTools);
+    }
 
-      // Get built-in tools
-      if (settings.builtinTools) {
-        const builtinTools = getBuiltinTools(settings.builtinTools);
-        mcpTools.push(...builtinTools);
-      }
+    // Always load builtin tools regardless of mcpEnabled (SQLite, filesystem, etc. are independent)
+    if (settings.builtinTools) {
+      const builtinTools = getBuiltinTools(settings.builtinTools);
+      mcpTools.push(...builtinTools);
     }
 
     // Build context breakdown for the client

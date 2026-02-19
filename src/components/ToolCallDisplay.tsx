@@ -3,6 +3,100 @@
 import { useState } from 'react';
 import { ToolCall } from '@/types';
 
+// SQL result types (mirrors builtin-tools.ts shapes)
+interface SqlSelectResult {
+  __sql_result__: true;
+  type: 'select';
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+  truncated: boolean;
+}
+
+interface SqlMutateResult {
+  __sql_result__: true;
+  type: 'mutate';
+  statement: string;
+  changes: number;
+  lastInsertRowid: number | bigint;
+}
+
+type SqlResult = SqlSelectResult | SqlMutateResult;
+
+function tryParseSqlResult(text: string): SqlResult | null {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && parsed.__sql_result__ === true) {
+      return parsed as SqlResult;
+    }
+  } catch { /* not JSON */ }
+  return null;
+}
+
+const SQL_PAGE_SIZE = 50;
+
+function SqlResultTable({ result }: { result: SqlResult }) {
+  const [page, setPage] = useState(0);
+
+  if (result.type === 'mutate') {
+    return (
+      <div className="sql-result-summary">
+        <strong>{result.statement}</strong> — {result.changes} row{result.changes !== 1 ? 's' : ''} affected
+        {result.lastInsertRowid ? ` (last insert rowid: ${result.lastInsertRowid})` : ''}
+      </div>
+    );
+  }
+
+  // SELECT result
+  const totalPages = Math.ceil(result.rows.length / SQL_PAGE_SIZE);
+  const pageRows = result.rows.slice(page * SQL_PAGE_SIZE, (page + 1) * SQL_PAGE_SIZE);
+
+  return (
+    <div>
+      {result.truncated && (
+        <div className="text-xs text-amber-600 dark:text-amber-400 mb-1">
+          Showing first 500 of {result.rowCount} rows
+        </div>
+      )}
+      <div className="sql-result-table-wrapper">
+        <table className="sql-result-table">
+          <thead>
+            <tr>
+              {result.columns.map((col) => (
+                <th key={col}>{col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {pageRows.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td key={ci}>
+                    {cell === null || cell === undefined
+                      ? <span className="sql-null">NULL</span>
+                      : String(cell)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {totalPages > 1 && (
+        <div className="sql-result-pagination">
+          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
+            ‹ Prev
+          </button>
+          <span>Page {page + 1} / {totalPages} ({result.rows.length} rows)</span>
+          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}>
+            Next ›
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ToolCallDisplayProps {
   toolCalls: ToolCall[];
   inline?: boolean;  // For inline display within message flow
@@ -30,6 +124,8 @@ function getToolIcon(name: string): string {
   if (name === 'create_artifact') return '🎨';
   if (name === 'update_artifact') return '✏️';
   if (name === 'read_artifact') return '📄';
+  if (name === 'execute_sql') return '🗄️';
+  if (name === 'get_db_schema') return '📊';
   if (name.startsWith('builtin_')) return '🔧';
   if (name.startsWith('mcp_')) return '🔌';
   return '⚙️';
@@ -127,9 +223,14 @@ function SingleToolCall({ toolCall, isExpanded, onToggle, inline }: SingleToolCa
           {status === 'completed' && result !== undefined && result !== null && (
             <div className="tool-call-section">
               <div className="tool-call-section-title">Result</div>
-              <pre className="tool-call-result-text">
-                {formatResult()}
-              </pre>
+              {(() => {
+                const formatted = formatResult();
+                const sqlResult = tryParseSqlResult(formatted);
+                if (sqlResult) {
+                  return <SqlResultTable result={sqlResult} />;
+                }
+                return <pre className="tool-call-result-text">{formatted}</pre>;
+              })()}
             </div>
           )}
         </div>

@@ -33,6 +33,11 @@ export const builtinToolsConfigSchema = z.object({
     enabled: z.boolean(),
     allowedDomains: z.array(z.string()).optional(),
   }).optional(),
+  sqlite: z.object({
+    enabled: z.boolean(),
+    databasePath: z.string().optional(),
+    readOnly: z.boolean().optional(),
+  }).optional(),
 });
 
 /**

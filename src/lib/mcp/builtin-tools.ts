@@ -8,6 +8,211 @@ import { parse as parseHtml, Node, HTMLElement as NHTMLElement } from 'node-html
 import type { UnifiedTool, BuiltinToolsConfig } from '@/types';
 import type { MCPCallToolResult } from './types';
 
+// SQLite types and lazy loader
+type Database = import('better-sqlite3').Database;
+
+// Connection cache: key = "path:readonly"
+const dbCache = new Map<string, Database>();
+
+// Lazily loaded better-sqlite3 constructor (avoids breaking the entire module if native addon is missing)
+let _BetterSqlite3: typeof import('better-sqlite3') | null = null;
+
+function getBetterSqlite3(): typeof import('better-sqlite3') {
+  if (!_BetterSqlite3) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      _BetterSqlite3 = require('better-sqlite3') as typeof import('better-sqlite3');
+    } catch (e) {
+      throw new Error(
+        `better-sqlite3 native module failed to load: ${e instanceof Error ? e.message : String(e)}. ` +
+        'Run "npm rebuild better-sqlite3" or reinstall with "npm install better-sqlite3".'
+      );
+    }
+  }
+  return _BetterSqlite3;
+}
+
+function getDb(dbPath: string, readOnly: boolean): Database {
+  const BetterSqlite3 = getBetterSqlite3();
+  const key = `${dbPath}:${readOnly}`;
+  if (!dbCache.has(key)) {
+    const db = new BetterSqlite3(dbPath, { readonly: readOnly, fileMustExist: true });
+    dbCache.set(key, db);
+  }
+  return dbCache.get(key)!;
+}
+
+/** Returns true if the SQL statement mutates data or schema */
+function isMutatingSQL(sql: string): boolean {
+  const trimmed = sql.trimStart().toUpperCase();
+  return /^(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|TRUNCATE|ATTACH|DETACH|VACUUM)\b/.test(trimmed);
+}
+
+const SQL_MAX_ROWS = 500;
+
+/** Result shape for SELECT queries */
+interface SqlSelectResult {
+  __sql_result__: true;
+  type: 'select';
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+  truncated: boolean;
+}
+
+/** Result shape for mutating statements */
+interface SqlMutateResult {
+  __sql_result__: true;
+  type: 'mutate';
+  statement: string;
+  changes: number;
+  lastInsertRowid: number | bigint;
+}
+
+export async function executeSql(
+  query: string,
+  config: BuiltinToolsConfig
+): Promise<MCPCallToolResult> {
+  const sqliteConfig = config.sqlite;
+
+  if (!sqliteConfig?.enabled) {
+    return { content: [{ type: 'text', text: 'SQLite access is disabled' }], isError: true };
+  }
+
+  if (!sqliteConfig.databasePath) {
+    return { content: [{ type: 'text', text: 'No database path configured' }], isError: true };
+  }
+
+  const readOnly = sqliteConfig.readOnly !== false; // default true
+
+  if (readOnly && isMutatingSQL(query)) {
+    return {
+      content: [{ type: 'text', text: 'Mutation not allowed: database is opened in read-only mode' }],
+      isError: true,
+    };
+  }
+
+  try {
+    const db = getDb(sqliteConfig.databasePath, readOnly);
+    const stmt = db.prepare(query);
+
+    const isSelect = !isMutatingSQL(query);
+
+    if (isSelect) {
+      const rawRows = stmt.all() as Record<string, unknown>[];
+      const truncated = rawRows.length > SQL_MAX_ROWS;
+      const limited = truncated ? rawRows.slice(0, SQL_MAX_ROWS) : rawRows;
+      const columns = limited.length > 0 ? Object.keys(limited[0]) : stmt.columns().map((c) => c.name);
+      const rows = limited.map((r) => columns.map((c) => r[c]));
+
+      const result: SqlSelectResult = {
+        __sql_result__: true,
+        type: 'select',
+        columns,
+        rows,
+        rowCount: truncated ? rawRows.length : rows.length,
+        truncated,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: false };
+    } else {
+      const info = stmt.run();
+      const result: SqlMutateResult = {
+        __sql_result__: true,
+        type: 'mutate',
+        statement: query.trimStart().toUpperCase().split(/\s+/)[0],
+        changes: info.changes,
+        lastInsertRowid: info.lastInsertRowid,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: false };
+    }
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `SQL error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true,
+    };
+  }
+}
+
+export async function getDbSchema(
+  config: BuiltinToolsConfig,
+  tableName?: string
+): Promise<MCPCallToolResult> {
+  const sqliteConfig = config.sqlite;
+
+  if (!sqliteConfig?.enabled) {
+    return { content: [{ type: 'text', text: 'SQLite access is disabled' }], isError: true };
+  }
+
+  if (!sqliteConfig.databasePath) {
+    return { content: [{ type: 'text', text: 'No database path configured' }], isError: true };
+  }
+
+  try {
+    const db = getDb(sqliteConfig.databasePath, true); // always read-only for schema
+
+    // Get list of tables (or just the requested one)
+    const tableRows = db.prepare(
+      tableName
+        ? `SELECT name FROM sqlite_master WHERE type='table' AND name=?`
+        : `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`
+    ).all(...(tableName ? [tableName] : [])) as { name: string }[];
+
+    const tables: Record<string, unknown>[] = [];
+
+    for (const { name } of tableRows) {
+      const columns = db.prepare(`PRAGMA table_info(${JSON.stringify(name)})`).all() as {
+        cid: number; name: string; type: string; notnull: number; dflt_value: unknown; pk: number;
+      }[];
+
+      const fkeys = db.prepare(`PRAGMA foreign_key_list(${JSON.stringify(name)})`).all() as {
+        id: number; seq: number; table: string; from: string; to: string;
+      }[];
+
+      const indexList = db.prepare(`PRAGMA index_list(${JSON.stringify(name)})`).all() as {
+        seq: number; name: string; unique: number; origin: string; partial: number;
+      }[];
+
+      const indexes: { name: string; unique: boolean; columns: string[] }[] = [];
+      for (const idx of indexList) {
+        const idxCols = db.prepare(`PRAGMA index_info(${JSON.stringify(idx.name)})`).all() as {
+          seqno: number; cid: number; name: string;
+        }[];
+        indexes.push({ name: idx.name, unique: idx.unique === 1, columns: idxCols.map((c) => c.name) });
+      }
+
+      let rowCount = 0;
+      try {
+        const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM ${JSON.stringify(name)}`).get() as { cnt: number };
+        rowCount = countRow.cnt;
+      } catch {
+        // ignore count errors for virtual tables etc.
+      }
+
+      tables.push({
+        name,
+        rowCount,
+        columns: columns.map((c) => ({
+          name: c.name,
+          type: c.type,
+          notNull: c.notnull === 1,
+          defaultValue: c.dflt_value,
+          primaryKey: c.pk > 0,
+        })),
+        foreignKeys: fkeys.map((f) => ({ from: f.from, toTable: f.table, toColumn: f.to })),
+        indexes,
+      });
+    }
+
+    const schema = { tables };
+    return { content: [{ type: 'text', text: JSON.stringify(schema, null, 2) }], isError: false };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Schema error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true,
+    };
+  }
+}
+
 const execFileAsync = promisify(execFile);
 
 // Security validation helpers
@@ -762,6 +967,41 @@ export function getBuiltinTools(config: BuiltinToolsConfig): UnifiedTool[] {
     });
   }
 
+  if (config.sqlite?.enabled) {
+    tools.push({
+      source: 'builtin',
+      name: 'execute_sql',
+      description:
+        'Query the connected SQLite database. Use this when the user asks about data stored in the database, wants to look up records, run analytics, or explore table contents. Write a SQL query (SELECT, PRAGMA, WITH) and get results as JSON with columns and rows. Max 500 rows returned. Call get_db_schema first if you need to discover table and column names.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'The SQL query to execute (e.g. SELECT * FROM users LIMIT 10)',
+          },
+        },
+        required: ['query'],
+      },
+    });
+
+    tools.push({
+      source: 'builtin',
+      name: 'get_db_schema',
+      description:
+        'Discover the structure of the connected SQLite database. Use this before execute_sql to learn which tables and columns exist. Returns table names, column names and types, primary keys, foreign keys, indexes, and row counts. Always call this first when the user asks about the database.',
+      parameters: {
+        type: 'object',
+        properties: {
+          table_name: {
+            type: 'string',
+            description: 'Get schema for this specific table only. If omitted, returns schema for all tables.',
+          },
+        },
+      },
+    });
+  }
+
   return tools;
 }
 
@@ -815,6 +1055,21 @@ export async function executeBuiltinTool(
         };
       }
       return shellExecute(params.command, config);
+    }
+
+    case 'execute_sql': {
+      if (typeof params.query !== 'string') {
+        return {
+          content: [{ type: 'text', text: 'Invalid parameter: "query" must be a string' }],
+          isError: true,
+        };
+      }
+      return executeSql(params.query, config);
+    }
+
+    case 'get_db_schema': {
+      const tableName = typeof params.table_name === 'string' ? params.table_name : undefined;
+      return getDbSchema(config, tableName);
     }
 
     default:

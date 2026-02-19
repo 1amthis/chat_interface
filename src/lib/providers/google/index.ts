@@ -149,8 +149,12 @@ export async function* streamGoogle(
   if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
     functionDeclarations.push(geminiRAGSearchDeclaration);
   }
+  // Add MCP/builtin tools (with per-tool call limit to prevent loops)
   if (mcpTools && mcpTools.length > 0) {
-    functionDeclarations.push(...toGeminiTools(mcpTools).functionDeclarations);
+    const filteredMcpTools = mcpTools.filter(t => !toolCallLimitReached(t.name, toolExecutions));
+    if (filteredMcpTools.length > 0) {
+      functionDeclarations.push(...toGeminiTools(filteredMcpTools).functionDeclarations);
+    }
   }
   // Artifact tools (enabled by default, can be toggled off)
   if (artifactsEnabled !== false) {

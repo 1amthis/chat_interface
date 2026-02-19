@@ -148,6 +148,11 @@ export interface BuiltinToolsConfig {
     enabled: boolean;
     allowedDomains?: string[];
   };
+  sqlite?: {
+    enabled: boolean;
+    databasePath?: string;
+    readOnly?: boolean;
+  };
 }
 
 export interface ChatSettings {

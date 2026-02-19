@@ -13,10 +13,107 @@ interface ConnectorsConfigProps {
 
 export function ConnectorsConfig({ settings, onSettingsChange, onClose }: ConnectorsConfigProps) {
   const [googleDriveConfigured, setGoogleDriveConfigured] = useState(false);
+  const [sqliteTestStatus, setSqliteTestStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [sqliteTesting, setSqliteTesting] = useState(false);
+  const [showConverter, setShowConverter] = useState(false);
+  const [convertFile, setConvertFile] = useState<File | null>(null);
+  const [convertOutputPath, setConvertOutputPath] = useState('');
+  const [converting, setConverting] = useState(false);
+  const [convertStatus, setConvertStatus] = useState<{
+    ok: boolean;
+    message: string;
+    tables?: { tableName: string; rowCount: number; columns: number }[];
+  } | null>(null);
 
   useEffect(() => {
     setGoogleDriveConfigured(isGoogleDriveConfigured());
   }, []);
+
+  const handleSqliteTest = async () => {
+    const dbPath = settings.builtinTools?.sqlite?.databasePath;
+    if (!dbPath) {
+      setSqliteTestStatus({ ok: false, message: 'Enter a database path first' });
+      return;
+    }
+    setSqliteTesting(true);
+    setSqliteTestStatus(null);
+    try {
+      const res = await fetch('/api/mcp/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'builtin',
+          toolName: 'get_db_schema',
+          params: {},
+          builtinToolsConfig: {
+            sqlite: { enabled: true, databasePath: dbPath, readOnly: true },
+          },
+        }),
+      });
+      const data = await res.json();
+      const toolResult = data.result;
+      if (!toolResult || toolResult.isError) {
+        setSqliteTestStatus({ ok: false, message: toolResult?.content?.[0]?.text || data.error || 'Connection failed' });
+      } else {
+        let tableCount = 0;
+        try {
+          const schema = JSON.parse(toolResult.content?.[0]?.text || '{}');
+          tableCount = schema.tables?.length ?? 0;
+        } catch { /* ignore */ }
+        setSqliteTestStatus({ ok: true, message: `Connected — ${tableCount} table${tableCount !== 1 ? 's' : ''} found` });
+      }
+    } catch (err) {
+      setSqliteTestStatus({ ok: false, message: err instanceof Error ? err.message : 'Connection failed' });
+    } finally {
+      setSqliteTesting(false);
+    }
+  };
+
+  const updateSqliteConfig = (patch: Partial<NonNullable<BuiltinToolsConfig['sqlite']>>) => {
+    const current = settings.builtinTools?.sqlite ?? { enabled: false };
+    onSettingsChange({
+      builtinTools: {
+        ...(settings.builtinTools ?? {}),
+        sqlite: { ...current, ...patch },
+      },
+    });
+  };
+
+  const handleConvert = async () => {
+    if (!convertFile) {
+      setConvertStatus({ ok: false, message: 'Select a file first' });
+      return;
+    }
+    if (!convertOutputPath.trim()) {
+      setConvertStatus({ ok: false, message: 'Enter an output path' });
+      return;
+    }
+    setConverting(true);
+    setConvertStatus(null);
+    try {
+      const form = new FormData();
+      form.append('file', convertFile);
+      form.append('outputPath', convertOutputPath.trim());
+      const res = await fetch('/api/sqlite/import', { method: 'POST', body: form });
+      const data = await res.json();
+      if (data.error) {
+        setConvertStatus({ ok: false, message: data.error });
+      } else {
+        const summary = (data.tables as { tableName: string; rowCount: number; columns: number }[])
+          .map(t => `${t.tableName} (${t.rowCount.toLocaleString()} rows × ${t.columns} cols)`)
+          .join(', ');
+        setConvertStatus({ ok: true, message: `Created ${data.tables.length} table${data.tables.length !== 1 ? 's' : ''}: ${summary}`, tables: data.tables });
+        // Auto-fill database path if not set
+        if (!settings.builtinTools?.sqlite?.databasePath) {
+          updateSqliteConfig({ databasePath: convertOutputPath.trim() });
+        }
+      }
+    } catch (err) {
+      setConvertStatus({ ok: false, message: err instanceof Error ? err.message : 'Conversion failed' });
+    } finally {
+      setConverting(false);
+    }
+  };
 
   const handleGoogleDriveConnect = () => {
     const authUrl = getGoogleAuthUrl();
@@ -266,6 +363,156 @@ export function ConnectorsConfig({ settings, onSettingsChange, onClose }: Connec
           <p className="text-xs text-gray-500 mt-3">
             Upload and manage documents in the Knowledge Base view.
           </p>
+        </section>
+
+        {/* SQLite Database */}
+        <section className="p-4 rounded-xl border border-[var(--border-color)]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+              </svg>
+              <div>
+                <label className="block text-sm font-medium">SQLite Database</label>
+                <p className="text-xs text-gray-500">
+                  Allow the AI to query a local SQLite database using natural language
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.builtinTools?.sqlite?.enabled || false}
+              onClick={() => updateSqliteConfig({ enabled: !settings.builtinTools?.sqlite?.enabled })}
+              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                settings.builtinTools?.sqlite?.enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  settings.builtinTools?.sqlite?.enabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {settings.builtinTools?.sqlite?.enabled && (
+            <div className="space-y-3 mt-4 pt-4 border-t border-[var(--border-color)]">
+              <div>
+                <label className="block text-sm font-medium mb-2">Database Path</label>
+                <input
+                  type="text"
+                  value={settings.builtinTools?.sqlite?.databasePath || ''}
+                  onChange={(e) => { updateSqliteConfig({ databasePath: e.target.value }); setSqliteTestStatus(null); }}
+                  placeholder="/path/to/database.db"
+                  className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)] font-mono text-sm"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-sm font-medium">Read-only mode</label>
+                  <p className="text-xs text-gray-500">Prevent INSERT, UPDATE, DELETE, and schema changes</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings.builtinTools?.sqlite?.readOnly !== false}
+                  onClick={() => updateSqliteConfig({ readOnly: settings.builtinTools?.sqlite?.readOnly === false ? true : false })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                    settings.builtinTools?.sqlite?.readOnly !== false ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      settings.builtinTools?.sqlite?.readOnly !== false ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleSqliteTest}
+                  disabled={sqliteTesting}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {sqliteTesting ? 'Testing…' : 'Test Connection'}
+                </button>
+                {sqliteTestStatus && (
+                  <span className={`text-sm ${sqliteTestStatus.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {sqliteTestStatus.ok ? '✓' : '✕'} {sqliteTestStatus.message}
+                  </span>
+                )}
+              </div>
+
+              {/* CSV / XLSX converter */}
+              <div className="pt-3 border-t border-[var(--border-color)]">
+                <button
+                  onClick={() => { setShowConverter(v => !v); setConvertStatus(null); }}
+                  className="flex items-center gap-1.5 text-sm text-cyan-600 dark:text-cyan-400 hover:underline"
+                >
+                  <svg
+                    className={`w-3.5 h-3.5 transition-transform ${showConverter ? 'rotate-90' : ''}`}
+                    fill="currentColor" viewBox="0 0 20 20"
+                  >
+                    <path d="M6 4l8 6-8 6V4z" />
+                  </svg>
+                  Convert CSV / XLSX to SQLite
+                </button>
+
+                {showConverter && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">File</label>
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] ?? null;
+                          setConvertFile(f);
+                          setConvertStatus(null);
+                          if (f && !convertOutputPath) {
+                            const base = f.name.replace(/\.[^.]+$/, '');
+                            setConvertOutputPath(`/tmp/${base}.db`);
+                          }
+                        }}
+                        className="block w-full text-sm text-gray-500 dark:text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-cyan-50 file:text-cyan-700 dark:file:bg-cyan-900/30 dark:file:text-cyan-300 hover:file:bg-cyan-100 dark:hover:file:bg-cyan-900/50"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">CSV, XLSX, or XLS. Each sheet becomes a table.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Output path</label>
+                      <input
+                        type="text"
+                        value={convertOutputPath}
+                        onChange={(e) => { setConvertOutputPath(e.target.value); setConvertStatus(null); }}
+                        placeholder="/path/to/output.db"
+                        className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)] font-mono text-sm"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Existing file will be overwritten.</p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handleConvert}
+                        disabled={converting || !convertFile}
+                        className="px-3 py-1.5 text-sm rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {converting ? 'Converting…' : 'Convert'}
+                      </button>
+                      {convertStatus && (
+                        <span className={`text-sm ${convertStatus.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {convertStatus.ok ? '✓' : '✕'} {convertStatus.message}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Artifacts */}
