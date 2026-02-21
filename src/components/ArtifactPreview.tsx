@@ -41,6 +41,15 @@ export function ArtifactPreview({ artifact, versionIndex, iframeRef }: ArtifactP
     case 'react':
       return <ReactPreview content={content} />;
 
+    case 'document':
+      return <MarkdownPreview content={content} />;
+
+    case 'spreadsheet':
+      return <CodePreview content={content} language="csv" />;
+
+    case 'presentation':
+      return <MarkdownPreview content={content} />;
+
     default:
       return (
         <div className="h-full flex items-center justify-center p-4">

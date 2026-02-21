@@ -85,13 +85,22 @@ export function buildArtifactSystemPrompt(existingArtifacts?: Artifact[]): strin
 
 You have access to artifact tools for creating and managing substantial content:
 
-- **create_artifact**: Create a new artifact (code, HTML, React, SVG, Markdown, Mermaid).
+- **create_artifact**: Create a new artifact (code, html, react, markdown, svg, mermaid, document, spreadsheet, presentation).
 - **update_artifact**: Replace an artifact's content with a new version. Always provide the complete content, not a diff.
 - **read_artifact**: Read an artifact's current content before editing it.
 
 ### When to use artifacts vs. inline code
-- Use **create_artifact** for: complete programs, full HTML pages, React components, diagrams, or any content that benefits from a preview panel.
+- Use **create_artifact** for: complete programs, full HTML pages, React components, diagrams, structured documents, spreadsheets, slide outlines, or any content that benefits from a preview panel.
 - Use **inline code blocks** for: short snippets, one-liners, explanations with small code examples, or partial code shown for illustration.
+- When generating files for export, prefer:
+  - **document** for DOCX/PDF style output
+  - **spreadsheet** for XLSX output (CSV or JSON-table content)
+  - **presentation** for PPTX output (slides separated with \`---\`, or JSON slides)
+- Structured content formats that export best:
+  - **document**: markdown headings/lists/tables OR JSON with \`blocks\` / \`sections\`
+  - **spreadsheet**: CSV/TSV, markdown tables, array-of-objects JSON, or \`{ "sheets": { ... } }\`
+  - **presentation**: markdown with \`---\` slide breaks or JSON \`{ "slides": [ { "title": "...", "bullets": [...] } ] }\`
+- Optionally set \`output_format\` on create/update to hint preferred export target (\`source\`, \`docx\`, \`pdf\`, \`xlsx\`, \`pptx\`).
 - When updating, use **read_artifact** first if the artifact content is not visible in the recent conversation, then **update_artifact** with the full new content.`;
 
   if (existingArtifacts && existingArtifacts.length > 0) {

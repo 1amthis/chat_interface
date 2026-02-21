@@ -12,7 +12,11 @@ export interface ToolSchema {
   description: string;
   parameters: {
     type: 'object';
-    properties: Record<string, { type: string; description: string }>;
+    properties: Record<string, {
+      type: string;
+      description: string;
+      enum?: string[];
+    }>;
     required: string[];
   };
 }
@@ -187,13 +191,14 @@ export const geminiRAGSearchDeclaration = {
 // Artifact tool schemas
 export const CREATE_ARTIFACT_SCHEMA: ToolSchema = {
   name: 'create_artifact',
-  description: 'Create a new artifact (code, HTML, React component, SVG, Markdown, or Mermaid diagram). Use this for substantial, self-contained content that benefits from a dedicated preview panel. Do NOT use this for short code snippets shown inline in conversation.',
+  description: 'Create a new artifact. Supported types: code, html, react, markdown, svg, mermaid, document, spreadsheet, presentation. Use this for substantial, self-contained content that benefits from a dedicated preview panel. Do NOT use this for short code snippets shown inline in conversation.',
   parameters: {
     type: 'object',
     properties: {
       type: {
         type: 'string',
-        description: 'The artifact type: "code", "html", "react", "svg", "markdown", or "mermaid"',
+        description: 'The artifact type.',
+        enum: ['code', 'html', 'react', 'markdown', 'svg', 'mermaid', 'document', 'spreadsheet', 'presentation'],
       },
       title: {
         type: 'string',
@@ -201,11 +206,16 @@ export const CREATE_ARTIFACT_SCHEMA: ToolSchema = {
       },
       content: {
         type: 'string',
-        description: 'The full content of the artifact',
+        description: 'The full content of the artifact. For document: markdown or JSON blocks/sections. For spreadsheet: CSV/TSV, markdown table, array-of-objects JSON, or {sheets:{...}} JSON. For presentation: markdown slides separated by --- or JSON {slides:[...]}.',
       },
       language: {
         type: 'string',
         description: 'Programming language for code artifacts (e.g. "python", "javascript", "typescript"). Only needed when type is "code".',
+      },
+      output_format: {
+        type: 'string',
+        description: 'Optional preferred file format for export/download.',
+        enum: ['source', 'docx', 'pdf', 'xlsx', 'pptx'],
       },
     },
     required: ['type', 'title', 'content'],
@@ -214,7 +224,7 @@ export const CREATE_ARTIFACT_SCHEMA: ToolSchema = {
 
 export const UPDATE_ARTIFACT_SCHEMA: ToolSchema = {
   name: 'update_artifact',
-  description: 'Update an existing artifact with new content. Always provide the complete updated content, not a diff. Use read_artifact first if you need to see the current content.',
+  description: 'Update an existing artifact with new content. Always provide the complete updated content, not a diff. Use read_artifact first if you need to see the current content. You may optionally update output_format.',
   parameters: {
     type: 'object',
     properties: {
@@ -224,11 +234,16 @@ export const UPDATE_ARTIFACT_SCHEMA: ToolSchema = {
       },
       content: {
         type: 'string',
-        description: 'The complete new content for the artifact (not a diff)',
+        description: 'The complete new content for the artifact (not a diff). Same supported formats as create_artifact.',
       },
       title: {
         type: 'string',
         description: 'Optional new title for the artifact',
+      },
+      output_format: {
+        type: 'string',
+        description: 'Optional preferred file format for export/download.',
+        enum: ['source', 'docx', 'pdf', 'xlsx', 'pptx'],
       },
     },
     required: ['artifact_id', 'content'],

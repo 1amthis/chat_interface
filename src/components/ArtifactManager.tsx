@@ -19,6 +19,9 @@ const TYPE_LABELS: Record<ArtifactType, string> = {
   markdown: 'Markdown',
   svg: 'SVG',
   mermaid: 'Diagram',
+  document: 'Document',
+  spreadsheet: 'Sheet',
+  presentation: 'Slides',
 };
 
 const TYPE_ICONS: Record<ArtifactType, React.ReactNode> = {
@@ -53,6 +56,21 @@ const TYPE_ICONS: Record<ArtifactType, React.ReactNode> = {
   mermaid: (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+    </svg>
+  ),
+  document: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h4m5 5H6a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" />
+    </svg>
+  ),
+  spreadsheet: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h16v16H4V4zm0 5h16M9 4v16m6-16v16" />
+    </svg>
+  ),
+  presentation: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h18v12H3V5zm8 12v2m-4 0h8" />
     </svg>
   ),
 };
@@ -135,6 +153,9 @@ export function ArtifactManager({
             <option value="markdown">Markdown</option>
             <option value="svg">SVG</option>
             <option value="mermaid">Diagram</option>
+            <option value="document">Document</option>
+            <option value="spreadsheet">Spreadsheet</option>
+            <option value="presentation">Presentation</option>
           </select>
           <div className="flex-1" />
           {artifacts.length > 0 && (

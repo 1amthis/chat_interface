@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback, useRef } from 'react';
-import { Artifact, Conversation } from '@/types';
+import { Artifact, ArtifactOutputFormat, Conversation } from '@/types';
 import { createStreamingState, StreamingArtifactState } from '@/lib/artifact-parser';
 import { saveConversation, getConversations } from '@/lib/storage';
 
@@ -25,7 +25,7 @@ export interface UseArtifactsReturn {
   handleSelectArtifact: (artifactId: string) => void;
   handleCloseArtifactPanel: () => void;
   handleRenameArtifact: (artifactId: string, newTitle: string) => void;
-  handleDownloadArtifact: (artifact: Artifact) => void;
+  handleDownloadArtifact: (artifact: Artifact, format?: ArtifactOutputFormat) => void;
   setArtifactPanelWidth: (width: number) => void;
   resetArtifactPanel: () => void;
   resetStreamingState: () => void;
@@ -65,9 +65,38 @@ export function useArtifacts({
     setConversations(getConversations());
   }, [currentConversation, setCurrentConversation, setConversations]);
 
-  const handleDownloadArtifact = useCallback((artifact: Artifact) => {
-    console.log('Downloaded artifact:', artifact.title);
-  }, []);
+  const handleDownloadArtifact = useCallback((artifact: Artifact, format?: ArtifactOutputFormat) => {
+    if (!format) return;
+
+    // Keep transient streaming artifacts in sync
+    const streamIndex = streamingArtifactsRef.current.findIndex(a => a.id === artifact.id);
+    if (streamIndex !== -1) {
+      streamingArtifactsRef.current = streamingArtifactsRef.current.map(a =>
+        a.id === artifact.id ? { ...a, preferredExportFormat: format, updatedAt: Date.now() } : a
+      );
+    }
+
+    if (!currentConversation || !currentConversation.artifacts) return;
+
+    const hasArtifact = currentConversation.artifacts.some(a => a.id === artifact.id);
+    if (!hasArtifact) return;
+
+    const updatedArtifacts = currentConversation.artifacts.map(a =>
+      a.id === artifact.id
+        ? { ...a, preferredExportFormat: format, updatedAt: Date.now() }
+        : a
+    );
+
+    const updatedConv = {
+      ...currentConversation,
+      artifacts: updatedArtifacts,
+      updatedAt: Date.now(),
+    };
+
+    setCurrentConversation(updatedConv);
+    saveConversation(updatedConv);
+    setConversations(getConversations());
+  }, [currentConversation, setCurrentConversation, setConversations]);
 
   const resetArtifactPanel = useCallback(() => {
     setArtifactPanelOpen(false);

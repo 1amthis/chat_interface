@@ -36,7 +36,22 @@ export interface ToolCallContentBlock {
 }
 
 // Artifact Types
-export type ArtifactType = 'code' | 'html' | 'react' | 'markdown' | 'svg' | 'mermaid';
+export const ARTIFACT_TYPES = [
+  'code',
+  'html',
+  'react',
+  'markdown',
+  'svg',
+  'mermaid',
+  'document',
+  'spreadsheet',
+  'presentation',
+] as const;
+
+export type ArtifactType = typeof ARTIFACT_TYPES[number];
+
+export const ARTIFACT_OUTPUT_FORMATS = ['source', 'docx', 'pdf', 'xlsx', 'pptx'] as const;
+export type ArtifactOutputFormat = typeof ARTIFACT_OUTPUT_FORMATS[number];
 
 export interface ArtifactVersion {
   id: string;
@@ -50,6 +65,7 @@ export interface Artifact {
   title: string;
   content: string;
   language?: string; // For code artifacts (javascript, python, etc.)
+  preferredExportFormat?: ArtifactOutputFormat; // Preferred format for downloads/exports
   versions: ArtifactVersion[];
   createdAt: number;
   updatedAt: number;

@@ -3,7 +3,16 @@
  */
 
 import { useState, useCallback } from 'react';
-import { ChatSettings, WebSearchResponse, GoogleDriveSearchResponse, ToolSource, Artifact, ArtifactType, ArtifactVersion } from '@/types';
+import {
+  ChatSettings,
+  WebSearchResponse,
+  GoogleDriveSearchResponse,
+  ToolSource,
+  Artifact,
+  ArtifactType,
+  ArtifactVersion,
+  ArtifactOutputFormat,
+} from '@/types';
 import { saveSettings, generateId } from '@/lib/storage';
 import { API_CONFIG } from '@/lib/constants';
 import { searchMemory, formatSearchResultsForAI, MemorySearchResult } from '@/lib/memory-search';
@@ -309,19 +318,34 @@ export function useToolExecution({
     params: Record<string, unknown>,
     currentArtifacts: Artifact[]
   ): ArtifactToolCallResult => {
-    const VALID_ARTIFACT_TYPES: ArtifactType[] = ['code', 'html', 'react', 'markdown', 'svg', 'mermaid'];
+    const VALID_ARTIFACT_TYPES: ArtifactType[] = [
+      'code',
+      'html',
+      'react',
+      'markdown',
+      'svg',
+      'mermaid',
+      'document',
+      'spreadsheet',
+      'presentation',
+    ];
+    const VALID_OUTPUT_FORMATS: ArtifactOutputFormat[] = ['source', 'docx', 'pdf', 'xlsx', 'pptx'];
 
     if (toolName === 'create_artifact') {
       const type = params.type as string;
       const title = params.title as string;
       const content = params.content as string;
       const language = params.language as string | undefined;
+      const outputFormat = params.output_format as ArtifactOutputFormat | undefined;
 
       if (!type || !title || !content) {
         return { result: 'Error: create_artifact requires type, title, and content parameters.', isError: true };
       }
       if (!VALID_ARTIFACT_TYPES.includes(type as ArtifactType)) {
         return { result: `Error: Invalid artifact type "${type}". Valid types: ${VALID_ARTIFACT_TYPES.join(', ')}`, isError: true };
+      }
+      if (outputFormat && !VALID_OUTPUT_FORMATS.includes(outputFormat)) {
+        return { result: `Error: Invalid output_format "${outputFormat}". Valid formats: ${VALID_OUTPUT_FORMATS.join(', ')}`, isError: true };
       }
 
       const newArtifact: Artifact = {
@@ -330,13 +354,20 @@ export function useToolExecution({
         title,
         content,
         language: type === 'code' ? language : undefined,
+        preferredExportFormat: outputFormat,
         versions: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
 
       return {
-        result: JSON.stringify({ success: true, artifact_id: newArtifact.id, title: newArtifact.title, type: newArtifact.type }),
+        result: JSON.stringify({
+          success: true,
+          artifact_id: newArtifact.id,
+          title: newArtifact.title,
+          type: newArtifact.type,
+          output_format: newArtifact.preferredExportFormat,
+        }),
         isError: false,
         newArtifact,
       };
@@ -346,9 +377,13 @@ export function useToolExecution({
       const artifactId = params.artifact_id as string;
       const content = params.content as string;
       const newTitle = params.title as string | undefined;
+      const outputFormat = params.output_format as ArtifactOutputFormat | undefined;
 
       if (!artifactId || !content) {
         return { result: 'Error: update_artifact requires artifact_id and content parameters.', isError: true };
+      }
+      if (outputFormat && !VALID_OUTPUT_FORMATS.includes(outputFormat)) {
+        return { result: `Error: Invalid output_format "${outputFormat}". Valid formats: ${VALID_OUTPUT_FORMATS.join(', ')}`, isError: true };
       }
 
       const existing = currentArtifacts.find(a => a.id === artifactId);
@@ -371,12 +406,19 @@ export function useToolExecution({
         ...existing,
         content,
         title: newTitle || existing.title,
+        preferredExportFormat: outputFormat || existing.preferredExportFormat,
         versions: [...existing.versions, version],
         updatedAt: Date.now(),
       };
 
       return {
-        result: JSON.stringify({ success: true, artifact_id: updatedArtifact.id, title: updatedArtifact.title, version: updatedArtifact.versions.length }),
+        result: JSON.stringify({
+          success: true,
+          artifact_id: updatedArtifact.id,
+          title: updatedArtifact.title,
+          version: updatedArtifact.versions.length,
+          output_format: updatedArtifact.preferredExportFormat,
+        }),
         isError: false,
         updatedArtifact,
       };
@@ -404,6 +446,7 @@ export function useToolExecution({
           type: existing.type,
           title: existing.title,
           language: existing.language,
+          output_format: existing.preferredExportFormat,
           content: existing.content,
           versions: existing.versions.length,
         }),

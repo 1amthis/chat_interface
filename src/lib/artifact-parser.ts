@@ -1,4 +1,4 @@
-import { ArtifactType } from '@/types';
+import { ARTIFACT_TYPES, ArtifactType } from '@/types';
 
 export interface ParsedArtifact {
   type: ArtifactType;
@@ -43,7 +43,7 @@ function parseAttributes(attrString: string): Record<string, string> {
 
 // Validate artifact type
 function isValidArtifactType(type: string): type is ArtifactType {
-  return ['code', 'html', 'react', 'markdown', 'svg', 'mermaid'].includes(type);
+  return (ARTIFACT_TYPES as readonly string[]).includes(type);
 }
 
 // Extract artifact metadata from opening tag

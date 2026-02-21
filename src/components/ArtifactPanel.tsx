@@ -1,9 +1,15 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Artifact, ArtifactType } from '@/types';
+import { Artifact, ArtifactOutputFormat, ArtifactType } from '@/types';
 import { ArtifactPreview } from './ArtifactPreview';
 import { useHtmlToPdf } from '@/hooks/useHtmlToPdf';
+import {
+  downloadBlob,
+  generateArtifactExportBlob,
+  getArtifactExportOptions,
+  getExportFilename,
+} from '@/lib/artifact-export';
 
 interface ArtifactPanelProps {
   artifact: Artifact | undefined;
@@ -11,7 +17,7 @@ interface ArtifactPanelProps {
   onClose: () => void;
   onResize: (width: number) => void;
   onRename: (artifactId: string, newTitle: string) => void;
-  onDownload: (artifact: Artifact) => void;
+  onDownload: (artifact: Artifact, format?: ArtifactOutputFormat) => void;
 }
 
 const TYPE_LABELS: Record<ArtifactType, string> = {
@@ -21,47 +27,10 @@ const TYPE_LABELS: Record<ArtifactType, string> = {
   markdown: 'Markdown',
   svg: 'SVG',
   mermaid: 'Diagram',
+  document: 'Document',
+  spreadsheet: 'Sheet',
+  presentation: 'Slides',
 };
-
-const FILE_EXTENSIONS: Record<ArtifactType, string> = {
-  code: 'txt',
-  html: 'html',
-  react: 'jsx',
-  markdown: 'md',
-  svg: 'svg',
-  mermaid: 'mmd',
-};
-
-function getFileExtension(artifact: Artifact): string {
-  if (artifact.language) {
-    const langMap: Record<string, string> = {
-      javascript: 'js',
-      typescript: 'ts',
-      python: 'py',
-      java: 'java',
-      cpp: 'cpp',
-      c: 'c',
-      csharp: 'cs',
-      go: 'go',
-      rust: 'rs',
-      ruby: 'rb',
-      php: 'php',
-      swift: 'swift',
-      kotlin: 'kt',
-      sql: 'sql',
-      json: 'json',
-      yaml: 'yaml',
-      xml: 'xml',
-      css: 'css',
-      scss: 'scss',
-      html: 'html',
-      shell: 'sh',
-      bash: 'sh',
-    };
-    return langMap[artifact.language.toLowerCase()] || artifact.language;
-  }
-  return FILE_EXTENSIONS[artifact.type];
-}
 
 export function ArtifactPanel({
   artifact,
@@ -75,10 +44,13 @@ export function ArtifactPanel({
   const [editTitle, setEditTitle] = useState('');
   const [selectedVersionIndex, setSelectedVersionIndex] = useState<number | undefined>(undefined);
   const [copied, setCopied] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ArtifactOutputFormat>('source');
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const resizeRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const exportOptions = artifact ? getArtifactExportOptions(artifact) : [];
 
   // PDF export hook for HTML artifacts
   const { downloadPdf, isGenerating: isGeneratingPdf, error: pdfError } = useHtmlToPdf(
@@ -92,6 +64,22 @@ export function ArtifactPanel({
       alert(`Failed to generate PDF: ${pdfError}`);
     }
   }, [pdfError]);
+
+  // Reset export format when artifact changes, respecting preferred format when valid
+  useEffect(() => {
+    if (!artifact) return;
+
+    const options = getArtifactExportOptions(artifact);
+    const preferred = artifact.preferredExportFormat;
+    if (preferred && options.some(option => option.format === preferred)) {
+      setExportFormat(preferred);
+      return;
+    }
+
+    if (options.length > 0) {
+      setExportFormat(options[0].format);
+    }
+  }, [artifact]);
 
   // Handle resize dragging
   useEffect(() => {
@@ -133,30 +121,28 @@ export function ArtifactPanel({
     setTimeout(() => setCopied(false), 2000);
   }, [artifact]);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (!artifact) return;
-    const ext = getFileExtension(artifact);
-    const filename = `${artifact.title.replace(/[^a-z0-9]/gi, '_')}.${ext}`;
-    const blob = new Blob([artifact.content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    onDownload(artifact);
-  }, [artifact, onDownload]);
 
-  const handleDownloadPdf = useCallback(async () => {
-    if (!artifact || artifact.type !== 'html') return;
     try {
-      await downloadPdf();
-      onDownload(artifact);
+      setIsExporting(true);
+
+      if (exportFormat === 'pdf' && artifact.type === 'html') {
+        await downloadPdf();
+      } else {
+        const blob = await generateArtifactExportBlob(artifact, exportFormat);
+        const filename = getExportFilename(artifact, exportFormat);
+        downloadBlob(blob, filename);
+      }
+
+      onDownload(artifact, exportFormat);
     } catch (error) {
-      console.error('Failed to download PDF:', error);
-      // Error is already handled by the hook
+      console.error('Failed to export artifact:', error);
+      alert(`Failed to export artifact as ${exportFormat.toUpperCase()}.`);
+    } finally {
+      setIsExporting(false);
     }
-  }, [artifact, downloadPdf, onDownload]);
+  }, [artifact, exportFormat, downloadPdf, onDownload]);
 
   const handleStartEdit = useCallback(() => {
     if (!artifact) return;
@@ -195,7 +181,8 @@ export function ArtifactPanel({
     return null;
   }
 
-  const showCodeToggle = ['html', 'react', 'svg', 'mermaid', 'markdown'].includes(artifact.type);
+  const showCodeToggle = ['html', 'react', 'svg', 'mermaid', 'markdown', 'document', 'spreadsheet', 'presentation'].includes(artifact.type);
+  const isBusy = isGeneratingPdf || isExporting;
 
   return (
     <div
@@ -339,32 +326,25 @@ export function ArtifactPanel({
           >
             {copied ? 'Copied!' : 'Copy'}
           </button>
+          <select
+            value={exportFormat}
+            onChange={(e) => setExportFormat(e.target.value as ArtifactOutputFormat)}
+            className="px-2 py-1.5 text-xs border border-[var(--border-color)] rounded bg-[var(--background)]"
+            title="Export format"
+          >
+            {exportOptions.map((option) => (
+              <option key={option.format} value={option.format}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <button
             onClick={handleDownload}
-            className="px-3 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            disabled={isBusy}
+            className="px-3 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Download
+            {isBusy ? 'Exporting...' : 'Export'}
           </button>
-          {artifact.type === 'html' && (
-            <button
-              onClick={handleDownloadPdf}
-              disabled={isGeneratingPdf}
-              className="px-3 py-1.5 text-xs bg-green-500 text-white rounded hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-              title="Download as PDF"
-            >
-              {isGeneratingPdf ? (
-                <>
-                  <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Generating...
-                </>
-              ) : (
-                'PDF Download'
-              )}
-            </button>
-          )}
         </div>
       </div>
     </div>
