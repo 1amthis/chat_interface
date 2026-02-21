@@ -14,7 +14,7 @@ import {
   getProjects,
   addUsageRecord,
 } from '@/lib/storage';
-import { mergeSystemPrompts, buildArtifactSystemPrompt, isArtifactTool } from '@/lib/providers';
+import { mergeSystemPrompts, buildArtifactSystemPrompt, isArtifactTool, isOpenAIReasoningModel } from '@/lib/providers';
 import { getActivePath, getSiblings, getDefaultLeaf, ensureTreeStructure } from '@/lib/conversation-tree';
 import { processStreamingChunk } from '@/lib/artifact-parser';
 import { MAX_TOOL_RECURSION_DEPTH } from '@/lib/constants';
@@ -37,6 +37,66 @@ import {
   useToolExecution,
   useScrollManagement,
 } from '@/hooks';
+
+function isOpenAINonDisableableReasoningModel(model: string): boolean {
+  return /^(o1|o2|o3)(\b|[.-])/.test(model) || /^o4-mini(\b|[.-])/.test(model);
+}
+
+function getOpenAIThinkingOffEffort(model: string): 'none' | 'minimal' | null {
+  if (isOpenAINonDisableableReasoningModel(model)) {
+    // o4-mini and o3-or-lower can't be truly "off"
+    return null;
+  }
+
+  const isGpt51Or52 = /^gpt-5\.(1|2)(\b|[.-])/.test(model);
+  if (isGpt51Or52) {
+    return 'none';
+  }
+
+  const isGpt5Family = /^gpt-5(\b|[.-])/.test(model);
+  if (isGpt5Family) {
+    return 'minimal';
+  }
+
+  return 'none';
+}
+
+function supportsThinkingToggle(provider: Provider, model: string): boolean {
+  if (provider === 'openai') {
+    return isOpenAIReasoningModel(model) && getOpenAIThinkingOffEffort(model) !== null;
+  }
+
+  if (provider === 'anthropic') {
+    // Extended thinking requires Claude 3.5+/4.x models
+    return /^claude-(opus|sonnet|haiku)-(4|3[\.-][5-9])/.test(model);
+  }
+
+  if (provider === 'google') {
+    return model.includes('gemini-2.5') || model.includes('gemini-3');
+  }
+
+  return false;
+}
+
+function isThinkingEnabled(settings: ChatSettings, provider: Provider, model: string): boolean {
+  if (!supportsThinkingToggle(provider, model)) return false;
+
+  if (provider === 'openai') {
+    const offEffort = getOpenAIThinkingOffEffort(model);
+    if (!offEffort) return true;
+    return (settings.openaiReasoningEffort || 'medium') !== offEffort;
+  }
+
+  if (provider === 'anthropic') {
+    return !!settings.anthropicThinkingEnabled;
+  }
+
+  if (provider === 'google') {
+    return !!settings.googleThinkingEnabled;
+  }
+
+  return false;
+}
 
 export function Chat() {
   // Core state
@@ -286,6 +346,45 @@ export function Chat() {
     setSettings(newSettings);
   }, [settings]);
 
+  const handleToggleThinking = useCallback((provider: Provider, model: string) => {
+    if (!supportsThinkingToggle(provider, model)) return;
+
+    let nextSettings = settings;
+
+    if (provider === 'openai') {
+      const currentEffort = settings.openaiReasoningEffort || 'medium';
+      const offEffort = getOpenAIThinkingOffEffort(model);
+      if (!offEffort) return;
+      const isEnabled = currentEffort !== offEffort;
+      nextSettings = {
+        ...settings,
+        openaiReasoningEffort: isEnabled ? offEffort : 'medium',
+      };
+    } else if (provider === 'anthropic') {
+      nextSettings = {
+        ...settings,
+        anthropicThinkingEnabled: !settings.anthropicThinkingEnabled,
+        anthropicThinkingBudgetTokens: settings.anthropicThinkingBudgetTokens || 1024,
+      };
+    } else if (provider === 'google') {
+      const enabling = !settings.googleThinkingEnabled;
+      const isGemini3 = model.includes('gemini-3');
+      nextSettings = {
+        ...settings,
+        googleThinkingEnabled: enabling,
+        googleThinkingLevel: isGemini3
+          ? (settings.googleThinkingLevel || 'medium')
+          : settings.googleThinkingLevel,
+        googleThinkingBudget: !isGemini3
+          ? (settings.googleThinkingBudget ?? -1)
+          : settings.googleThinkingBudget,
+      };
+    }
+
+    saveSettings(nextSettings);
+    setSettings(nextSettings);
+  }, [settings]);
+
   const handlePickDriveFile = useCallback(() => {
     // For now, show an alert. In a full implementation, this would open a Google Drive picker
     // The Google Drive Picker API requires additional setup and a separate API key
@@ -303,6 +402,23 @@ export function Chat() {
     setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     resetArtifactPanel();
   }, [resetArtifactPanel]);
+
+  const activeProject = useMemo(
+    () => (currentProjectId ? projects.find(p => p.id === currentProjectId) : undefined),
+    [currentProjectId, projects]
+  );
+
+  const activeProjectProvider = activeProject?.provider || settings.provider;
+  const activeProjectModel = activeProject?.model || settings.model;
+  const activeProjectModels = [
+    ...DEFAULT_MODELS[activeProjectProvider],
+    ...(settings.customModels?.[activeProjectProvider] || []),
+  ];
+
+  const globalThinkingSupported = supportsThinkingToggle(settings.provider, settings.model);
+  const globalThinkingEnabled = isThinkingEnabled(settings, settings.provider, settings.model);
+  const projectThinkingSupported = supportsThinkingToggle(activeProjectProvider, activeProjectModel);
+  const projectThinkingEnabled = isThinkingEnabled(settings, activeProjectProvider, activeProjectModel);
 
   // Core function to stream a response for a given conversation
   const streamResponse = useCallback(async (
@@ -1461,7 +1577,7 @@ export function Chat() {
             />
           ) : currentProjectId ? (
             <ProjectDashboard
-              project={projects.find(p => p.id === currentProjectId)!}
+              project={activeProject!}
               conversations={conversations.filter(c => c.projectId === currentProjectId)}
               onSelectConversation={handleSelectConversation}
               onSendMessage={(message, attachments) => handleSendInProject(currentProjectId, message, attachments)}
@@ -1480,25 +1596,15 @@ export function Chat() {
               onToggleGoogleDrive={handleToggleGoogleDrive}
               googleDriveConnected={!!settings.googleDriveAccessToken}
               onPickDriveFile={handlePickDriveFile}
-              currentProvider={(() => {
-                const project = projects.find(p => p.id === currentProjectId);
-                return project?.provider || settings.provider;
-              })()}
-              currentModel={(() => {
-                const project = projects.find(p => p.id === currentProjectId);
-                return project?.model || settings.model;
-              })()}
+              currentProvider={activeProjectProvider}
+              currentModel={activeProjectModel}
               onModelChange={handleModelChange}
               onProviderChange={handleProviderChange}
-              availableModels={(() => {
-                const project = projects.find(p => p.id === currentProjectId);
-                const provider = project?.provider || settings.provider;
-                return [
-                  ...DEFAULT_MODELS[provider],
-                  ...(settings.customModels?.[provider] || []),
-                ];
-              })()}
+              availableModels={activeProjectModels}
               customModels={settings.customModels}
+              thinkingSupported={projectThinkingSupported}
+              thinkingEnabled={projectThinkingEnabled}
+              onToggleThinking={() => handleToggleThinking(activeProjectProvider, activeProjectModel)}
             />
           ) : displayMessages.length ? (
             <>
@@ -1599,6 +1705,9 @@ export function Chat() {
                 ...(settings.customModels?.[settings.provider] || []),
               ]}
               customModels={settings.customModels}
+              thinkingSupported={globalThinkingSupported}
+              thinkingEnabled={globalThinkingEnabled}
+              onToggleThinking={() => handleToggleThinking(settings.provider, settings.model)}
             />
           </div>
         )}

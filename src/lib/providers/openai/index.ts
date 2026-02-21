@@ -360,6 +360,42 @@ function toResponsesAPITools(
   return tools;
 }
 
+function isOpenAINonDisableableReasoningModel(model: string): boolean {
+  return /^(o1|o2|o3)(\b|[.-])/.test(model) || /^o4-mini(\b|[.-])/.test(model);
+}
+
+function normalizeOpenAIReasoningEffort(
+  model: string,
+  effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+): 'none' | 'minimal' | 'low' | 'medium' | 'high' {
+  const chosen = effort || 'medium';
+  const isGpt51Or52 = /^gpt-5\.(1|2)(\b|[.-])/.test(model);
+  const isGpt5Family = /^gpt-5(\b|[.-])/.test(model);
+  const isNonDisableableReasoning = isOpenAINonDisableableReasoningModel(model);
+
+  if (chosen === 'xhigh') return 'high';
+
+  // gpt-5 (base and variants except 5.1/5.2) doesn't accept "none"
+  if (isGpt5Family && !isGpt51Or52 && chosen === 'none') {
+    return 'minimal';
+  }
+
+  // o4-mini and o3-or-lower can't have thinking fully disabled
+  if (isNonDisableableReasoning && chosen === 'none') {
+    return 'minimal';
+  }
+
+  return chosen;
+}
+
+function isUnsupportedReasoningEffortError(error: unknown): boolean {
+  const err = error as { code?: string; param?: string; message?: string } | undefined;
+  return (
+    err?.code === 'unsupported_value' &&
+    (err?.param === 'reasoning.effort' || err?.message?.includes('reasoning.effort') === true)
+  );
+}
+
 /**
  * Stream using OpenAI Responses API (for reasoning models with reasoning summaries)
  */
@@ -384,6 +420,7 @@ export async function* streamOpenAIResponses(
   if (!apiKey) throw new Error('OpenAI API key is required');
 
   const client = new OpenAI({ apiKey });
+  const normalizedEffort = normalizeOpenAIReasoningEffort(model, openaiReasoningEffort);
 
   // Build structured input array for Responses API
   const inputMessages: Record<string, unknown>[] = [];
@@ -462,7 +499,7 @@ export async function* streamOpenAIResponses(
     input: inputMessages,
     stream: true,
     reasoning: {
-      effort: openaiReasoningEffort || 'medium',
+      effort: normalizedEffort,
       summary: 'auto',
     },
     max_output_tokens: maxOutputTokens || 16384,
@@ -497,7 +534,32 @@ export async function* streamOpenAIResponses(
     create(options: Record<string, unknown>): Promise<AsyncIterable<Record<string, unknown>>>;
   };
 
-  const stream = await responsesClient.create(requestOptions);
+  let stream: AsyncIterable<Record<string, unknown>>;
+  try {
+    stream = await responsesClient.create(requestOptions);
+  } catch (error) {
+    if (!isUnsupportedReasoningEffortError(error)) {
+      throw error;
+    }
+
+    const isGpt51Or52 = /^gpt-5\.(1|2)(\b|[.-])/.test(model);
+    const isGpt5Family = /^gpt-5(\b|[.-])/.test(model);
+    const isNonDisableableReasoning = isOpenAINonDisableableReasoningModel(model);
+    const fallbackEffort: 'minimal' | 'medium' =
+      (isGpt5Family && !isGpt51Or52) || isNonDisableableReasoning ? 'minimal' : 'medium';
+    const reasoning = requestOptions.reasoning as Record<string, unknown> | undefined;
+    const currentEffort = reasoning?.effort as string | undefined;
+
+    if (!reasoning || currentEffort === fallbackEffort) {
+      throw error;
+    }
+
+    console.warn(
+      `[OpenAI] reasoning.effort "${currentEffort}" unsupported for "${model}", retrying with "${fallbackEffort}"`
+    );
+    reasoning.effort = fallbackEffort;
+    stream = await responsesClient.create(requestOptions);
+  }
 
   let inputTokens = 0;
   let outputTokens = 0;

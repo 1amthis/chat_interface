@@ -279,7 +279,11 @@ export async function POST(request: NextRequest) {
           controller.close();
         } catch (error) {
           const errorMessage = extractErrorMessage(error);
-          console.error('[chat/route] Stream error:', errorMessage, error);
+          console.error(
+            `[chat/route] Stream error [provider=${settings.provider} model=${settings.model}]`,
+            errorMessage,
+            error
+          );
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`));
           controller.close();
         }

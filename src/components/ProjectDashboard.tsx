@@ -35,6 +35,9 @@ interface ProjectDashboardProps {
   onProviderChange?: (provider: Provider) => void;
   availableModels?: string[];
   customModels?: Partial<Record<Provider, string[]>>;
+  thinkingSupported?: boolean;
+  thinkingEnabled?: boolean;
+  onToggleThinking?: () => void;
 }
 
 export function ProjectDashboard({
@@ -59,6 +62,9 @@ export function ProjectDashboard({
   onProviderChange,
   availableModels,
   customModels,
+  thinkingSupported,
+  thinkingEnabled,
+  onToggleThinking,
 }: ProjectDashboardProps) {
   const [instructions, setInstructions] = useState(project.instructions || '');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | null>(null);
@@ -354,6 +360,9 @@ export function ProjectDashboard({
         onProviderChange={onProviderChange}
         availableModels={availableModels}
         customModels={customModels}
+        thinkingSupported={thinkingSupported}
+        thinkingEnabled={thinkingEnabled}
+        onToggleThinking={onToggleThinking}
       />
 
       {/* Delete Confirmation Modal */}

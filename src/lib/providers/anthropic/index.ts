@@ -127,11 +127,6 @@ export async function* streamAnthropic(
     messages: anthropicMessages,
   };
 
-  // Anthropic temperature range is 0-1
-  if (temperature !== undefined) {
-    requestOptions.temperature = Math.min(Math.max(temperature, 0), 1);
-  }
-
   // If we are replaying a tool-use assistant turn, we can only keep thinking enabled
   // if the signed thinking block was provided (Anthropic requires it before tool_use).
   const canEnableThinking =
@@ -148,6 +143,12 @@ export async function* streamAnthropic(
         budget_tokens: budget,
       };
     }
+  }
+
+  // Anthropic temperature range is 0-1.
+  // When extended thinking is enabled, temperature MUST NOT be set (API rejects it).
+  if (temperature !== undefined && !requestOptions.thinking) {
+    requestOptions.temperature = Math.min(Math.max(temperature, 0), 1);
   }
 
   // Build tools array based on enabled features

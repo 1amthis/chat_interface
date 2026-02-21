@@ -101,22 +101,28 @@ export async function* streamGoogle(
     generationConfig.temperature = temperature;
   }
 
-  // Gemini 2.5+ models think by default. Always request thought summaries
-  // so they appear in the UI. The thinkingEnabled toggle and budget/level
-  // settings control HOW much thinking happens, not whether we see it.
+  // Gemini 2.5+ models support explicit thinking controls.
+  // Keep this aligned with the chat-level thinking toggle.
   const isThinkingCapable = model.includes('gemini-2.5') || model.includes('gemini-3');
 
   if (isThinkingCapable) {
+    const thinkingEnabled = !!googleThinkingEnabled;
     const thinkingConfig: Record<string, unknown> = {
-      includeThoughts: true,
+      includeThoughts: thinkingEnabled,
     };
 
-    if (googleThinkingEnabled) {
+    if (thinkingEnabled) {
       if (isGemini3 && googleThinkingLevel) {
         thinkingConfig.thinkingLevel = googleThinkingLevel.toUpperCase();
       } else if (!isGemini3 && googleThinkingBudget !== undefined) {
         thinkingConfig.thinkingBudget = googleThinkingBudget;
       }
+    } else if (isGemini3) {
+      // Gemini 3 uses thinkingLevel to disable thinking.
+      thinkingConfig.thinkingLevel = 'NONE';
+    } else {
+      // Gemini 2.5 uses budget to disable thinking.
+      thinkingConfig.thinkingBudget = 0;
     }
 
     generationConfig.thinkingConfig = thinkingConfig;
