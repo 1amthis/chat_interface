@@ -648,11 +648,13 @@ export async function* streamOpenAIResponses(
         try {
           const args = JSON.parse(fc.arguments || '{}');
 
-          // Determine tool source from name
-          let toolName = fc.name;
-          let toolSource: ToolSource = 'builtin';
-          let toolServerId: string | undefined;
+          // Determine tool source from name using shared parser
+          const parsed = parseToolName(fc.name);
+          let toolName = parsed.name;
+          let toolSource: ToolSource = parsed.source as ToolSource;
+          let toolServerId: string | undefined = parsed.serverId;
 
+          // Override source for special tool types not handled by parseToolName
           if (fc.name === 'web_search') {
             toolSource = 'web_search';
           } else if (fc.name === 'google_drive_search') {
@@ -663,23 +665,6 @@ export async function* streamOpenAIResponses(
             toolSource = 'rag_search';
           } else if (isArtifactTool(fc.name)) {
             toolSource = 'artifact';
-          } else if (fc.name.startsWith('mcp__')) {
-            // New __ delimiter format: mcp__serverId__toolName
-            toolSource = 'mcp';
-            const rest = fc.name.slice(5);
-            const sepIdx = rest.indexOf('__');
-            if (sepIdx !== -1) {
-              toolServerId = rest.slice(0, sepIdx);
-              toolName = rest.slice(sepIdx + 2);
-            }
-          } else if (fc.name.startsWith('mcp_')) {
-            // Legacy _ delimiter format: mcp_serverId_toolName
-            toolSource = 'mcp';
-            const parts = fc.name.split('_');
-            if (parts.length >= 3) {
-              toolServerId = parts[1];
-              toolName = parts.slice(2).join('_');
-            }
           }
 
           yield {

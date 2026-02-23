@@ -107,25 +107,33 @@ export async function* streamGoogle(
 
   if (isThinkingCapable) {
     const thinkingEnabled = !!googleThinkingEnabled;
-    const thinkingConfig: Record<string, unknown> = {
-      includeThoughts: thinkingEnabled,
-    };
 
     if (thinkingEnabled) {
+      const thinkingConfig: Record<string, unknown> = { includeThoughts: true };
       if (isGemini3 && googleThinkingLevel) {
         thinkingConfig.thinkingLevel = googleThinkingLevel.toUpperCase();
       } else if (!isGemini3 && googleThinkingBudget !== undefined) {
         thinkingConfig.thinkingBudget = googleThinkingBudget;
       }
+      generationConfig.thinkingConfig = thinkingConfig;
     } else if (isGemini3) {
-      // Gemini 3 uses thinkingLevel to disable thinking.
-      thinkingConfig.thinkingLevel = 'NONE';
+      // Gemini 3 doesn't support "NONE" as a thinkingLevel.
+      // Flash: use MINIMAL (closest to off). Pro: thinking can't be
+      // disabled, so omit thinkingConfig and let the API use defaults.
+      if (model.includes('flash')) {
+        generationConfig.thinkingConfig = {
+          includeThoughts: false,
+          thinkingLevel: 'MINIMAL',
+        };
+      }
+      // For Gemini 3 Pro, omit thinkingConfig entirely
     } else {
-      // Gemini 2.5 uses budget to disable thinking.
-      thinkingConfig.thinkingBudget = 0;
+      // Gemini 2.5 uses budget=0 to disable thinking.
+      generationConfig.thinkingConfig = {
+        includeThoughts: false,
+        thinkingBudget: 0,
+      };
     }
-
-    generationConfig.thinkingConfig = thinkingConfig;
   }
 
   const requestBody: Record<string, unknown> = {
