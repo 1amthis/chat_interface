@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ToolCall } from '@/types';
+import { ToolCall, WebSearchResponse } from '@/types';
 
 // SQL result types (mirrors builtin-tools.ts shapes)
 interface SqlSelectResult {
@@ -93,6 +93,78 @@ function SqlResultTable({ result }: { result: SqlResult }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function tryParseWebSearchResponse(result: unknown): WebSearchResponse | null {
+  if (!result || typeof result !== 'object') return null;
+  const obj = result as Record<string, unknown>;
+  if (typeof obj.query === 'string' && Array.isArray(obj.results) && typeof obj.timestamp === 'number') {
+    return obj as unknown as WebSearchResponse;
+  }
+  // Also try parsing from a JSON string
+  if (typeof result === 'string') {
+    try {
+      const parsed = JSON.parse(result);
+      if (parsed && typeof parsed.query === 'string' && Array.isArray(parsed.results)) {
+        return parsed as WebSearchResponse;
+      }
+    } catch { /* not JSON */ }
+  }
+  return null;
+}
+
+function getDomain(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+function WebSearchResultsList({ response }: { response: WebSearchResponse }) {
+  if (response.results.length === 0) {
+    return (
+      <div className="tool-results-header">
+        No results found for &quot;{response.query}&quot;
+      </div>
+    );
+  }
+
+  return (
+    <div className="tool-call-results">
+      <div className="tool-results-header">
+        {response.results.length} result{response.results.length !== 1 ? 's' : ''} for &quot;{response.query}&quot;
+      </div>
+      <div className="tool-results-list">
+        {response.results.map((r, i) => {
+          const domain = getDomain(r.url);
+          return (
+            <a
+              key={i}
+              href={r.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="tool-result-item"
+            >
+              <div className="tool-result-header-row">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=16`}
+                  alt=""
+                  className="tool-result-favicon"
+                  width={16}
+                  height={16}
+                />
+                <span className="tool-result-domain">{domain}</span>
+              </div>
+              <div className="tool-result-title">{r.title}</div>
+            </a>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -224,6 +296,11 @@ function SingleToolCall({ toolCall, isExpanded, onToggle, inline }: SingleToolCa
             <div className="tool-call-section">
               <div className="tool-call-section-title">Result</div>
               {(() => {
+                // Check for web search response (object form)
+                const webSearch = name === 'web_search' ? tryParseWebSearchResponse(result) : null;
+                if (webSearch) {
+                  return <WebSearchResultsList response={webSearch} />;
+                }
                 const formatted = formatResult();
                 const sqlResult = tryParseSqlResult(formatted);
                 if (sqlResult) {
