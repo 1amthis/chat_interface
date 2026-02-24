@@ -609,3 +609,125 @@ export interface PdfExportOptions {
     avoid?: string | string[];
   };
 }
+
+// ===== Rich Presentation Types =====
+
+/** Slide layout presets */
+export type SlideLayout =
+  | 'title'           // Title slide (big centered title + subtitle)
+  | 'title-content'   // Title + body content (default)
+  | 'section'         // Section divider (centered title, accent background)
+  | 'two-column'      // Title + two content columns
+  | 'blank'           // Blank slide (freeform content)
+  | 'image-left'      // Image on left, content on right
+  | 'image-right';    // Image on right, content on left
+
+/** Color theme for the presentation — all hex colors WITHOUT # prefix */
+export interface PresentationTheme {
+  background?: string;
+  titleColor?: string;
+  bodyColor?: string;
+  accentColor?: string;
+  titleFont?: string;
+  bodyFont?: string;
+}
+
+/** A single text run with optional formatting */
+export interface SlideTextRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  color?: string;
+  fontSize?: number;
+  fontFace?: string;
+  hyperlink?: string;
+}
+
+/** A bullet point (simple string or formatted text runs) */
+export type SlideBullet = string | SlideTextRun[];
+
+/** Table cell */
+export interface SlideTableCell {
+  text: string;
+  bold?: boolean;
+  fill?: string;
+  color?: string;
+  align?: 'left' | 'center' | 'right';
+  colspan?: number;
+  rowspan?: number;
+}
+
+/** Table definition */
+export interface SlideTable {
+  headers?: (string | SlideTableCell)[];
+  rows: (string | SlideTableCell)[][];
+  headerFill?: string;
+  headerColor?: string;
+  borderColor?: string;
+}
+
+/** Chart data series */
+export interface SlideChartSeries {
+  name: string;
+  labels: string[];
+  values: number[];
+}
+
+/** Chart definition */
+export interface SlideChart {
+  type: 'bar' | 'line' | 'pie' | 'doughnut' | 'area' | 'radar' | 'scatter';
+  data: SlideChartSeries[];
+  title?: string;
+  showLegend?: boolean;
+  showValue?: boolean;
+  chartColors?: string[];
+}
+
+/** Image on a slide */
+export interface SlideImage {
+  data?: string;   // Base64 data URI
+  path?: string;   // URL
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+}
+
+/** Shape on a slide */
+export interface SlideShape {
+  type: 'rect' | 'ellipse' | 'roundRect' | 'line';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fill?: string;
+  line?: { color?: string; width?: number };
+  rectRadius?: number;
+  text?: string;
+  fontSize?: number;
+  color?: string;
+  align?: 'left' | 'center' | 'right';
+}
+
+/** A single slide in the rich format */
+export interface RichSlide {
+  layout?: SlideLayout;
+  title?: string;
+  subtitle?: string;
+  bullets?: SlideBullet[];
+  body?: string;
+  notes?: string;
+  table?: SlideTable;
+  chart?: SlideChart;
+  images?: SlideImage[];
+  shapes?: SlideShape[];
+  background?: string;
+  titleColor?: string;
+  bodyColor?: string;
+}
+
+/** Top-level rich presentation JSON */
+export interface RichPresentation {
+  theme?: PresentationTheme;
+  slides: RichSlide[];
+}

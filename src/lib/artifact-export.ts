@@ -12,7 +12,7 @@ type RichBlock =
   | { type: 'table'; headers: string[]; rows: string[][] }
   | { type: 'code'; text: string; language?: string };
 
-interface SlideContent {
+export interface SlideContent {
   title: string;
   subtitle?: string;
   bullets: string[];
@@ -31,7 +31,7 @@ const SOURCE_EXTENSIONS: Record<Artifact['type'], string> = {
   mermaid: 'mmd',
   document: 'md',
   spreadsheet: 'csv',
-  presentation: 'md',
+  presentation: 'json',
 };
 
 const SOURCE_MIME_TYPES: Record<Artifact['type'], string> = {
@@ -43,7 +43,7 @@ const SOURCE_MIME_TYPES: Record<Artifact['type'], string> = {
   mermaid: 'text/plain',
   document: 'text/markdown',
   spreadsheet: 'text/csv',
-  presentation: 'text/markdown',
+  presentation: 'application/json',
 };
 
 const LANGUAGE_EXTENSIONS: Record<string, string> = {
@@ -1133,7 +1133,7 @@ function splitBlocksIntoSlides(blocks: RichBlock[], fallbackTitle: string): Slid
     .filter((slide): slide is SlideContent => slide !== null);
 }
 
-function parseSlides(content: string, fallbackTitle: string): SlideContent[] {
+export function parseSlides(content: string, fallbackTitle: string): SlideContent[] {
   const parsed = safeJsonParse(content);
 
   if (Array.isArray(parsed)) {
@@ -1180,344 +1180,452 @@ function parseSlides(content: string, fallbackTitle: string): SlideContent[] {
   ];
 }
 
-function buildSlideXml(slide: SlideContent, slideNumber: number): string {
-  const title = escapeXml(slide.title || `Slide ${slideNumber}`);
-  const subtitle = slide.subtitle ? escapeXml(slide.subtitle) : '';
-  const subtitleParagraph = subtitle
-    ? `<a:p><a:r><a:rPr lang="en-US" sz="2000" b="1"/><a:t>${subtitle}</a:t></a:r><a:endParaRPr lang="en-US" sz="2000"/></a:p>`
-    : '';
+// --- PptxGenJS-based PPTX generation ---
 
-  const bodyParagraphs = slide.bullets
-    .filter(line => line !== null && line !== undefined)
-    .map((line) => {
-      const text = escapeXml(line || ' ');
-      if (!text.trim()) {
-        return '<a:p><a:endParaRPr lang="en-US" sz="1800"/></a:p>';
-      }
-      return `<a:p><a:pPr lvl="0"><a:buChar char="-"/></a:pPr><a:r><a:rPr lang="en-US" sz="1800"/><a:t>${text}</a:t></a:r><a:endParaRPr lang="en-US" sz="1800"/></a:p>`;
-    })
-    .join('');
+import type PptxGenJS from 'pptxgenjs';
+import { parsePresentationContent } from './presentation-parser';
+import type { RichSlide, SlideBullet, SlideTable, SlideChart, SlideImage, SlideShape, PresentationTheme } from '@/types';
 
-  const contentXml = `${subtitleParagraph}${bodyParagraphs}` || '<a:p><a:endParaRPr lang="en-US" sz="1800"/></a:p>';
+interface ThemeDefaults {
+  background: string;
+  titleColor: string;
+  bodyColor: string;
+  accentColor: string;
+  titleFont: string;
+  bodyFont: string;
+}
 
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
-  <p:cSld name="Slide ${slideNumber}">
-    <p:spTree>
-      <p:nvGrpSpPr>
-        <p:cNvPr id="1" name=""/>
-        <p:cNvGrpSpPr/>
-        <p:nvPr/>
-      </p:nvGrpSpPr>
-      <p:grpSpPr>
-        <a:xfrm>
-          <a:off x="0" y="0"/>
-          <a:ext cx="0" cy="0"/>
-          <a:chOff x="0" y="0"/>
-          <a:chExt cx="0" cy="0"/>
-        </a:xfrm>
-      </p:grpSpPr>
-      <p:sp>
-        <p:nvSpPr>
-          <p:cNvPr id="2" name="Title ${slideNumber}"/>
-          <p:cNvSpPr/>
-          <p:nvPr/>
-        </p:nvSpPr>
-        <p:spPr>
-          <a:xfrm>
-            <a:off x="685800" y="457200"/>
-            <a:ext cx="7772400" cy="914400"/>
-          </a:xfrm>
-        </p:spPr>
-        <p:txBody>
-          <a:bodyPr/>
-          <a:lstStyle/>
-          <a:p>
-            <a:r>
-              <a:rPr lang="en-US" sz="3200" b="1"/>
-              <a:t>${title}</a:t>
-            </a:r>
-            <a:endParaRPr lang="en-US" sz="3200"/>
-          </a:p>
-        </p:txBody>
-      </p:sp>
-      <p:sp>
-        <p:nvSpPr>
-          <p:cNvPr id="3" name="Content ${slideNumber}"/>
-          <p:cNvSpPr txBox="1"/>
-          <p:nvPr/>
-        </p:nvSpPr>
-        <p:spPr>
-          <a:xfrm>
-            <a:off x="685800" y="1600200"/>
-            <a:ext cx="7772400" cy="4572000"/>
-          </a:xfrm>
-        </p:spPr>
-        <p:txBody>
-          <a:bodyPr anchor="t"/>
-          <a:lstStyle/>
-          ${contentXml}
-        </p:txBody>
-      </p:sp>
-    </p:spTree>
-  </p:cSld>
-  <p:clrMapOvr>
-    <a:masterClrMapping/>
-  </p:clrMapOvr>
-</p:sld>`;
+/** Strip leading # from hex color if present */
+function cleanHex(color: string | undefined, fallback: string): string {
+  if (!color) return fallback;
+  return color.replace(/^#/, '') || fallback;
+}
+
+function buildBulletTextRows(
+  bullets: SlideBullet[],
+  defaults: ThemeDefaults,
+): PptxGenJS.TextProps[] {
+  const rows: PptxGenJS.TextProps[] = [];
+  bullets.forEach((bullet, i) => {
+    const isLast = i === bullets.length - 1;
+    if (typeof bullet === 'string') {
+      rows.push({
+        text: bullet,
+        options: {
+          fontSize: 18,
+          fontFace: defaults.bodyFont,
+          color: defaults.bodyColor,
+          bullet: true,
+          paraSpaceAfter: 4,
+          breakLine: !isLast,
+        },
+      });
+    } else {
+      // Rich text: each run is a separate TextProps entry
+      bullet.forEach((run, j) => {
+        const isLastRun = j === bullet.length - 1;
+        rows.push({
+          text: run.text,
+          options: {
+            bold: run.bold,
+            italic: run.italic,
+            color: cleanHex(run.color, defaults.bodyColor),
+            fontSize: run.fontSize ?? 18,
+            fontFace: run.fontFace ?? defaults.bodyFont,
+            hyperlink: run.hyperlink ? { url: run.hyperlink } : undefined,
+            bullet: j === 0 ? true : undefined,
+            paraSpaceAfter: isLastRun ? 4 : undefined,
+            breakLine: isLastRun && !isLast,
+          },
+        });
+      });
+    }
+  });
+  return rows;
+}
+
+function addTitle(
+  slide: PptxGenJS.Slide,
+  title: string,
+  opts: { x: number; y: number; w: number; h: number; fontSize: number; color: string; font: string; align?: PptxGenJS.HAlign; valign?: PptxGenJS.VAlign; bold?: boolean },
+) {
+  slide.addText(title, {
+    x: opts.x,
+    y: opts.y,
+    w: opts.w,
+    h: opts.h,
+    fontSize: opts.fontSize,
+    fontFace: opts.font,
+    color: opts.color,
+    bold: opts.bold ?? true,
+    align: opts.align ?? 'left',
+    valign: opts.valign ?? 'top',
+    wrap: true,
+  });
+}
+
+function addBullets(
+  slide: PptxGenJS.Slide,
+  bullets: SlideBullet[],
+  defaults: ThemeDefaults,
+  pos: { x: number; y: number; w: number; h: number },
+) {
+  if (!bullets || bullets.length === 0) return;
+  slide.addText(buildBulletTextRows(bullets, defaults), {
+    x: pos.x,
+    y: pos.y,
+    w: pos.w,
+    h: pos.h,
+    valign: 'top',
+    wrap: true,
+  });
+}
+
+function addBodyText(
+  slide: PptxGenJS.Slide,
+  body: string,
+  defaults: ThemeDefaults,
+  pos: { x: number; y: number; w: number; h: number },
+) {
+  slide.addText(body, {
+    x: pos.x,
+    y: pos.y,
+    w: pos.w,
+    h: pos.h,
+    fontSize: 16,
+    fontFace: defaults.bodyFont,
+    color: defaults.bodyColor,
+    valign: 'top',
+    wrap: true,
+  });
+}
+
+function renderTitleSlide(slide: PptxGenJS.Slide, data: RichSlide, defaults: ThemeDefaults) {
+  if (data.title) {
+    addTitle(slide, data.title, {
+      x: 0.5, y: 1.5, w: 9.0, h: 1.5,
+      fontSize: 36, color: cleanHex(data.titleColor, defaults.titleColor),
+      font: defaults.titleFont, align: 'center', valign: 'bottom',
+    });
+  }
+  if (data.subtitle) {
+    slide.addText(data.subtitle, {
+      x: 1.0, y: 3.2, w: 8.0, h: 0.8,
+      fontSize: 20, fontFace: defaults.bodyFont,
+      color: cleanHex(data.bodyColor, defaults.bodyColor),
+      align: 'center', valign: 'top', wrap: true,
+    });
+  }
+  // Accent bar under title
+  slide.addShape('rect' as unknown as PptxGenJS.ShapeType, {
+    x: 3.5, y: 3.0, w: 3.0, h: 0.05,
+    fill: { color: defaults.accentColor },
+  });
+}
+
+function renderSectionSlide(slide: PptxGenJS.Slide, data: RichSlide, defaults: ThemeDefaults) {
+  // Override background with accent color for section slides
+  slide.background = { fill: cleanHex(data.background, defaults.accentColor) };
+  if (data.title) {
+    addTitle(slide, data.title, {
+      x: 0.5, y: 1.5, w: 9.0, h: 2.0,
+      fontSize: 32, color: 'FFFFFF',
+      font: defaults.titleFont, align: 'center', valign: 'middle',
+    });
+  }
+  if (data.subtitle) {
+    slide.addText(data.subtitle, {
+      x: 1.0, y: 3.5, w: 8.0, h: 0.8,
+      fontSize: 18, fontFace: defaults.bodyFont,
+      color: 'FFFFFF', align: 'center', valign: 'top', wrap: true,
+    });
+  }
+}
+
+function renderTitleContentSlide(slide: PptxGenJS.Slide, data: RichSlide, defaults: ThemeDefaults) {
+  const titleColor = cleanHex(data.titleColor, defaults.titleColor);
+  if (data.title) {
+    addTitle(slide, data.title, {
+      x: 0.5, y: 0.3, w: 9.0, h: 0.8,
+      fontSize: 28, color: titleColor, font: defaults.titleFont,
+    });
+    // Thin accent line under title
+    slide.addShape('rect' as unknown as PptxGenJS.ShapeType, {
+      x: 0.5, y: 1.15, w: 2.0, h: 0.04,
+      fill: { color: defaults.accentColor },
+    });
+  }
+  if (data.subtitle) {
+    slide.addText(data.subtitle, {
+      x: 0.5, y: 1.3, w: 9.0, h: 0.5,
+      fontSize: 16, fontFace: defaults.bodyFont,
+      color: cleanHex(data.bodyColor, defaults.bodyColor),
+      italic: true, valign: 'top', wrap: true,
+    });
+  }
+  const contentY = data.subtitle ? 1.9 : 1.4;
+  const contentH = 5.625 - contentY - 0.3;
+  if (data.bullets && data.bullets.length > 0) {
+    addBullets(slide, data.bullets, defaults, { x: 0.5, y: contentY, w: 9.0, h: contentH });
+  } else if (data.body) {
+    addBodyText(slide, data.body, defaults, { x: 0.5, y: contentY, w: 9.0, h: contentH });
+  }
+}
+
+function renderTwoColumnSlide(slide: PptxGenJS.Slide, data: RichSlide, defaults: ThemeDefaults) {
+  if (data.title) {
+    addTitle(slide, data.title, {
+      x: 0.5, y: 0.3, w: 9.0, h: 0.8,
+      fontSize: 28, color: cleanHex(data.titleColor, defaults.titleColor), font: defaults.titleFont,
+    });
+  }
+  // Left column: bullets
+  if (data.bullets && data.bullets.length > 0) {
+    addBullets(slide, data.bullets, defaults, { x: 0.5, y: 1.4, w: 4.3, h: 3.9 });
+  }
+  // Right column: body text
+  if (data.body) {
+    addBodyText(slide, data.body, defaults, { x: 5.2, y: 1.4, w: 4.3, h: 3.9 });
+  }
+}
+
+function renderImageSlide(slide: PptxGenJS.Slide, data: RichSlide, defaults: ThemeDefaults, imageRight: boolean) {
+  const imgX = imageRight ? 5.2 : 0.5;
+  const contentX = imageRight ? 0.5 : 5.2;
+
+  if (data.title) {
+    addTitle(slide, data.title, {
+      x: 0.5, y: 0.3, w: 9.0, h: 0.8,
+      fontSize: 28, color: cleanHex(data.titleColor, defaults.titleColor), font: defaults.titleFont,
+    });
+  }
+  // Place first image in the image area
+  if (data.images && data.images.length > 0) {
+    const img = data.images[0];
+    const imgProps: Record<string, unknown> = {
+      x: imgX, y: 1.4, w: 4.3, h: 3.9,
+    };
+    if (img.data) imgProps.data = img.data;
+    else if (img.path) imgProps.path = img.path;
+    if (imgProps.data || imgProps.path) {
+      slide.addImage(imgProps as PptxGenJS.ImageProps);
+    }
+  }
+  // Content in the other half
+  if (data.bullets && data.bullets.length > 0) {
+    addBullets(slide, data.bullets, defaults, { x: contentX, y: 1.4, w: 4.3, h: 3.9 });
+  } else if (data.body) {
+    addBodyText(slide, data.body, defaults, { x: contentX, y: 1.4, w: 4.3, h: 3.9 });
+  }
+}
+
+function renderSlideTable(slide: PptxGenJS.Slide, table: SlideTable, defaults: ThemeDefaults) {
+  const rows: PptxGenJS.TableRow[] = [];
+  const headerFill = cleanHex(table.headerFill, defaults.accentColor);
+  const headerColor = cleanHex(table.headerColor, 'FFFFFF');
+  const borderColor = cleanHex(table.borderColor, 'CCCCCC');
+
+  if (table.headers && table.headers.length > 0) {
+    rows.push(table.headers.map(h => {
+      const text = typeof h === 'string' ? h : h.text;
+      return {
+        text,
+        options: {
+          bold: true,
+          color: headerColor,
+          fill: { color: headerFill },
+          align: 'center' as PptxGenJS.HAlign,
+          fontSize: 14,
+          fontFace: defaults.bodyFont,
+          border: { type: 'solid' as const, pt: 0.5, color: borderColor },
+        },
+      };
+    }));
+  }
+
+  for (const row of table.rows) {
+    rows.push(row.map(cell => {
+      const isObj = typeof cell === 'object' && cell !== null;
+      const text = isObj ? cell.text : cell;
+      return {
+        text,
+        options: {
+          bold: isObj ? cell.bold : undefined,
+          color: isObj && cell.color ? cleanHex(cell.color, defaults.bodyColor) : defaults.bodyColor,
+          fill: isObj && cell.fill ? { color: cleanHex(cell.fill, 'FFFFFF') } : undefined,
+          align: (isObj ? cell.align : 'left') as PptxGenJS.HAlign,
+          fontSize: 12,
+          fontFace: defaults.bodyFont,
+          border: { type: 'solid' as const, pt: 0.5, color: borderColor },
+          colspan: isObj ? cell.colspan : undefined,
+          rowspan: isObj ? cell.rowspan : undefined,
+        },
+      };
+    }));
+  }
+
+  if (rows.length > 0) {
+    slide.addTable(rows, {
+      x: 0.5, y: 1.5, w: 9.0,
+      colW: Array(rows[0]?.length || 1).fill(9.0 / (rows[0]?.length || 1)),
+      autoPage: false,
+    });
+  }
+}
+
+function renderSlideChart(pres: PptxGenJS, slide: PptxGenJS.Slide, chart: SlideChart, defaults: ThemeDefaults) {
+  const chartTypeMap: Record<string, PptxGenJS.CHART_NAME> = {
+    bar: pres.ChartType.bar,
+    line: pres.ChartType.line,
+    pie: pres.ChartType.pie,
+    doughnut: pres.ChartType.doughnut,
+    area: pres.ChartType.area,
+    radar: pres.ChartType.radar,
+    scatter: pres.ChartType.scatter,
+  };
+
+  const chartType = chartTypeMap[chart.type] ?? pres.ChartType.bar;
+  const chartData = chart.data.map(series => ({
+    name: series.name,
+    labels: series.labels,
+    values: series.values,
+  }));
+
+  const colors = chart.chartColors?.map(c => cleanHex(c, defaults.accentColor))
+    ?? [defaults.accentColor, '10B981', 'F59E0B', 'EF4444', '8B5CF6', '06B6D4'];
+
+  slide.addChart(chartType, chartData, {
+    x: 0.5, y: 1.5, w: 9.0, h: 3.8,
+    showTitle: !!chart.title,
+    title: chart.title,
+    showLegend: chart.showLegend ?? true,
+    legendPos: 'b',
+    showValue: chart.showValue ?? false,
+    chartColors: colors,
+  });
+}
+
+function renderSlideImages(slide: PptxGenJS.Slide, images: SlideImage[]) {
+  for (const img of images) {
+    const props: Record<string, unknown> = {
+      x: img.x ?? 0.5,
+      y: img.y ?? 1.5,
+      w: img.w ?? 4.0,
+      h: img.h ?? 3.0,
+    };
+    if (img.data) props.data = img.data;
+    else if (img.path) props.path = img.path;
+    if (props.data || props.path) {
+      slide.addImage(props as PptxGenJS.ImageProps);
+    }
+  }
+}
+
+function renderSlideShapes(pres: PptxGenJS, slide: PptxGenJS.Slide, shapes: SlideShape[], defaults: ThemeDefaults) {
+  const shapeMap: Record<string, PptxGenJS.ShapeType> = {
+    rect: pres.ShapeType.rect,
+    ellipse: pres.ShapeType.ellipse,
+    roundRect: pres.ShapeType.roundRect,
+    line: pres.ShapeType.line,
+  };
+
+  for (const shape of shapes) {
+    const shapeType = shapeMap[shape.type] ?? pres.ShapeType.rect;
+    const opts: Record<string, unknown> = {
+      x: shape.x,
+      y: shape.y,
+      w: shape.w,
+      h: shape.h,
+    };
+    if (shape.fill) opts.fill = { color: cleanHex(shape.fill, defaults.accentColor) };
+    if (shape.line) {
+      opts.line = {
+        color: cleanHex(shape.line.color, '333333'),
+        width: shape.line.width ?? 1,
+      };
+    }
+    if (shape.rectRadius !== undefined) opts.rectRadius = shape.rectRadius;
+    slide.addShape(shapeType, opts as PptxGenJS.ShapeProps);
+
+    if (shape.text) {
+      slide.addText(shape.text, {
+        x: shape.x,
+        y: shape.y,
+        w: shape.w,
+        h: shape.h,
+        fontSize: shape.fontSize ?? 14,
+        fontFace: defaults.bodyFont,
+        color: cleanHex(shape.color, defaults.bodyColor),
+        align: (shape.align ?? 'center') as PptxGenJS.HAlign,
+        valign: 'middle',
+      });
+    }
+  }
 }
 
 async function generatePptxBlob(content: string, title: string): Promise<Blob> {
-  const JSZip = (await import('jszip')).default;
-  const zip = new JSZip();
-  const slides = parseSlides(content, title || 'Presentation');
-  const createdAt = new Date().toISOString();
+  const PptxGenJSLib = (await import('pptxgenjs')).default;
+  const pres = new PptxGenJSLib();
 
-  const slideOverrides = slides
-    .map((_, index) => `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`)
-    .join('');
+  pres.layout = 'LAYOUT_16x9';
+  pres.author = 'Opus Artifacts';
+  pres.title = title || 'Presentation';
 
-  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
-  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
-  <Override PartName="/ppt/presProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presProps+xml"/>
-  <Override PartName="/ppt/viewProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml"/>
-  <Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>
-  <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
-  <Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
-  ${slideOverrides}
-</Types>`);
+  const richPres = parsePresentationContent(content, title || 'Presentation');
+  const theme = richPres.theme ?? {};
 
-  zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-</Relationships>`);
+  const defaults: ThemeDefaults = {
+    background: cleanHex(theme.background, 'FFFFFF'),
+    titleColor: cleanHex(theme.titleColor, '1A1A2E'),
+    bodyColor: cleanHex(theme.bodyColor, '333333'),
+    accentColor: cleanHex(theme.accentColor, '3B82F6'),
+    titleFont: theme.titleFont ?? 'Arial',
+    bodyFont: theme.bodyFont ?? 'Calibri',
+  };
 
-  zip.file('docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dc:title>${escapeXml(title || 'Presentation')}</dc:title>
-  <dc:creator>Opus Artifacts</dc:creator>
-  <cp:lastModifiedBy>Opus Artifacts</cp:lastModifiedBy>
-  <dcterms:created xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:created>
-  <dcterms:modified xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:modified>
-</cp:coreProperties>`);
+  for (const slideData of richPres.slides) {
+    const slide = pres.addSlide();
+    const bg = cleanHex(slideData.background, defaults.background);
+    slide.background = { fill: bg };
 
-  zip.file('docProps/app.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>Opus Artifacts</Application>
-  <Slides>${slides.length}</Slides>
-</Properties>`);
+    const layout = slideData.layout ?? 'title-content';
 
-  const slideIdList = slides
-    .map((_, index) => `<p:sldId id="${256 + index}" r:id="rId${index + 4}"/>`)
-    .join('');
+    switch (layout) {
+      case 'title':
+        renderTitleSlide(slide, slideData, defaults);
+        break;
+      case 'section':
+        renderSectionSlide(slide, slideData, defaults);
+        break;
+      case 'two-column':
+        renderTwoColumnSlide(slide, slideData, defaults);
+        break;
+      case 'image-left':
+        renderImageSlide(slide, slideData, defaults, false);
+        break;
+      case 'image-right':
+        renderImageSlide(slide, slideData, defaults, true);
+        break;
+      case 'blank':
+        // No layout-specific content
+        break;
+      case 'title-content':
+      default:
+        renderTitleContentSlide(slide, slideData, defaults);
+        break;
+    }
 
-  zip.file('ppt/presentation.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
-  <p:sldMasterIdLst>
-    <p:sldMasterId id="2147483648" r:id="rId1"/>
-  </p:sldMasterIdLst>
-  <p:sldIdLst>
-    ${slideIdList}
-  </p:sldIdLst>
-  <p:sldSz cx="9144000" cy="6858000" type="screen4x3"/>
-  <p:notesSz cx="6858000" cy="9144000"/>
-  <p:defaultTextStyle>
-    <a:defPPr/>
-    <a:lvl1pPr marL="0" indent="0">
-      <a:defRPr sz="1800"/>
-    </a:lvl1pPr>
-  </p:defaultTextStyle>
-</p:presentation>`);
+    // Optional elements (added on top of layout)
+    if (slideData.table) renderSlideTable(slide, slideData.table, defaults);
+    if (slideData.chart) renderSlideChart(pres, slide, slideData.chart, defaults);
+    // For non-image layouts, render images if present
+    if (layout !== 'image-left' && layout !== 'image-right' && slideData.images) {
+      renderSlideImages(slide, slideData.images);
+    }
+    if (slideData.shapes) renderSlideShapes(pres, slide, slideData.shapes, defaults);
+    if (slideData.notes) slide.addNotes(slideData.notes);
+  }
 
-  const presentationSlideRels = slides
-    .map((_, index) => `<Relationship Id="rId${index + 4}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${index + 1}.xml"/>`)
-    .join('');
-
-  zip.file('ppt/_rels/presentation.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/presProps" Target="presProps.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/viewProps" Target="viewProps.xml"/>
-  ${presentationSlideRels}
-</Relationships>`);
-
-  zip.file('ppt/presProps.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:presentationPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`);
-
-  zip.file('ppt/viewProps.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:viewPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`);
-
-  zip.file('ppt/slideMasters/slideMaster1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
-  <p:cSld name="Simple Slide Master">
-    <p:spTree>
-      <p:nvGrpSpPr>
-        <p:cNvPr id="1" name=""/>
-        <p:cNvGrpSpPr/>
-        <p:nvPr/>
-      </p:nvGrpSpPr>
-      <p:grpSpPr>
-        <a:xfrm>
-          <a:off x="0" y="0"/>
-          <a:ext cx="0" cy="0"/>
-          <a:chOff x="0" y="0"/>
-          <a:chExt cx="0" cy="0"/>
-        </a:xfrm>
-      </p:grpSpPr>
-    </p:spTree>
-  </p:cSld>
-  <p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>
-  <p:sldLayoutIdLst>
-    <p:sldLayoutId id="2147483649" r:id="rId1"/>
-  </p:sldLayoutIdLst>
-  <p:txStyles>
-    <p:titleStyle>
-      <a:lvl1pPr algn="l"/>
-    </p:titleStyle>
-    <p:bodyStyle>
-      <a:lvl1pPr marL="342900" indent="-285750"/>
-    </p:bodyStyle>
-    <p:otherStyle>
-      <a:defPPr/>
-    </p:otherStyle>
-  </p:txStyles>
-</p:sldMaster>`);
-
-  zip.file('ppt/slideMasters/_rels/slideMaster1.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>
-</Relationships>`);
-
-  zip.file('ppt/slideLayouts/slideLayout1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="titleAndContent" preserve="1">
-  <p:cSld name="Title and Content">
-    <p:spTree>
-      <p:nvGrpSpPr>
-        <p:cNvPr id="1" name=""/>
-        <p:cNvGrpSpPr/>
-        <p:nvPr/>
-      </p:nvGrpSpPr>
-      <p:grpSpPr>
-        <a:xfrm>
-          <a:off x="0" y="0"/>
-          <a:ext cx="0" cy="0"/>
-          <a:chOff x="0" y="0"/>
-          <a:chExt cx="0" cy="0"/>
-        </a:xfrm>
-      </p:grpSpPr>
-      <p:sp>
-        <p:nvSpPr>
-          <p:cNvPr id="2" name="Title Placeholder 1"/>
-          <p:cNvSpPr>
-            <a:spLocks noGrp="1"/>
-          </p:cNvSpPr>
-          <p:nvPr>
-            <p:ph type="title"/>
-          </p:nvPr>
-        </p:nvSpPr>
-        <p:spPr/>
-        <p:txBody>
-          <a:bodyPr/>
-          <a:lstStyle/>
-          <a:p/>
-        </p:txBody>
-      </p:sp>
-      <p:sp>
-        <p:nvSpPr>
-          <p:cNvPr id="3" name="Content Placeholder 2"/>
-          <p:cNvSpPr>
-            <a:spLocks noGrp="1"/>
-          </p:cNvSpPr>
-          <p:nvPr>
-            <p:ph type="body" idx="1"/>
-          </p:nvPr>
-        </p:nvSpPr>
-        <p:spPr/>
-        <p:txBody>
-          <a:bodyPr/>
-          <a:lstStyle/>
-          <a:p/>
-        </p:txBody>
-      </p:sp>
-    </p:spTree>
-  </p:cSld>
-  <p:clrMapOvr>
-    <a:masterClrMapping/>
-  </p:clrMapOvr>
-</p:sldLayout>`);
-
-  zip.file('ppt/slideLayouts/_rels/slideLayout1.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
-</Relationships>`);
-
-  zip.file('ppt/theme/theme1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Simple Theme">
-  <a:themeElements>
-    <a:clrScheme name="Simple">
-      <a:dk1><a:srgbClr val="000000"/></a:dk1>
-      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
-      <a:dk2><a:srgbClr val="1F497D"/></a:dk2>
-      <a:lt2><a:srgbClr val="EEECE1"/></a:lt2>
-      <a:accent1><a:srgbClr val="4F81BD"/></a:accent1>
-      <a:accent2><a:srgbClr val="C0504D"/></a:accent2>
-      <a:accent3><a:srgbClr val="9BBB59"/></a:accent3>
-      <a:accent4><a:srgbClr val="8064A2"/></a:accent4>
-      <a:accent5><a:srgbClr val="4BACC6"/></a:accent5>
-      <a:accent6><a:srgbClr val="F79646"/></a:accent6>
-      <a:hlink><a:srgbClr val="0000FF"/></a:hlink>
-      <a:folHlink><a:srgbClr val="800080"/></a:folHlink>
-    </a:clrScheme>
-    <a:fontScheme name="Simple">
-      <a:majorFont>
-        <a:latin typeface="Calibri"/>
-        <a:ea typeface=""/>
-        <a:cs typeface=""/>
-      </a:majorFont>
-      <a:minorFont>
-        <a:latin typeface="Calibri"/>
-        <a:ea typeface=""/>
-        <a:cs typeface=""/>
-      </a:minorFont>
-    </a:fontScheme>
-    <a:fmtScheme name="Simple">
-      <a:fillStyleLst>
-        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
-      </a:fillStyleLst>
-      <a:lnStyleLst>
-        <a:ln w="9525" cap="flat" cmpd="sng" algn="ctr">
-          <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
-          <a:prstDash val="solid"/>
-        </a:ln>
-      </a:lnStyleLst>
-      <a:effectStyleLst>
-        <a:effectStyle><a:effectLst/></a:effectStyle>
-      </a:effectStyleLst>
-      <a:bgFillStyleLst>
-        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
-      </a:bgFillStyleLst>
-    </a:fmtScheme>
-  </a:themeElements>
-  <a:objectDefaults/>
-  <a:extraClrSchemeLst/>
-</a:theme>`);
-
-  slides.forEach((slide, index) => {
-    const slideIndex = index + 1;
-    zip.file(`ppt/slides/slide${slideIndex}.xml`, buildSlideXml(slide, slideIndex));
-    zip.file(`ppt/slides/_rels/slide${slideIndex}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
-</Relationships>`);
-  });
-
-  return zip.generateAsync({ type: 'blob', mimeType: PPTX_MIME });
+  const output = await pres.write({ outputType: 'blob' });
+  return output as Blob;
 }

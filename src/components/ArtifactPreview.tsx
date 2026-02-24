@@ -8,6 +8,7 @@ import { HTMLPreview } from './artifact-previews/HTMLPreview';
 import { SVGPreview } from './artifact-previews/SVGPreview';
 import { MermaidPreview } from './artifact-previews/MermaidPreview';
 import { ReactPreview } from './artifact-previews/ReactPreview';
+import { PresentationPreview } from './artifact-previews/PresentationPreview';
 
 interface ArtifactPreviewProps {
   artifact: Artifact;
@@ -48,7 +49,7 @@ export function ArtifactPreview({ artifact, versionIndex, iframeRef }: ArtifactP
       return <CodePreview content={content} language="csv" />;
 
     case 'presentation':
-      return <MarkdownPreview content={content} />;
+      return <PresentationPreview content={content} />;
 
     default:
       return (

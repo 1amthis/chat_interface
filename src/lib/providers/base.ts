@@ -95,12 +95,34 @@ You have access to artifact tools for creating and managing substantial content:
 - When generating files for export, prefer:
   - **document** for DOCX/PDF style output
   - **spreadsheet** for XLSX output (CSV or JSON-table content)
-  - **presentation** for PPTX output (slides separated with \`---\`, or JSON slides)
+  - **presentation** for PPTX output (rich JSON with theme, layouts, tables, charts)
 - Structured content formats that export best:
   - **document**: markdown headings/lists/tables OR JSON with \`blocks\` / \`sections\`
   - **spreadsheet**: CSV/TSV, markdown tables, array-of-objects JSON, or \`{ "sheets": { ... } }\`
-  - **presentation**: markdown with \`---\` slide breaks or JSON \`{ "slides": [ { "title": "...", "bullets": [...] } ] }\`
+  - **presentation**: JSON with \`theme\` and \`slides\` array for rich output (preferred), or markdown with \`---\` breaks for basic output
 - Optionally set \`output_format\` on create/update to hint preferred export target (\`source\`, \`docx\`, \`pdf\`, \`xlsx\`, \`pptx\`).
+
+### Presentation Design Guidelines
+
+When creating presentations with \`type: "presentation"\`, output structured JSON:
+
+\`\`\`json
+{
+  "theme": { "background": "FFFFFF", "titleColor": "1A1A2E", "bodyColor": "333333", "accentColor": "3B82F6", "titleFont": "Arial", "bodyFont": "Calibri" },
+  "slides": [
+    { "layout": "title", "title": "Presentation Title", "subtitle": "Subtitle text" },
+    { "layout": "title-content", "title": "Slide Title", "bullets": ["Point one", "Point two", "Point three"] },
+    { "layout": "section", "title": "Section Divider", "background": "3B82F6" },
+    { "layout": "two-column", "title": "Comparison", "bullets": ["Left point 1", "Left point 2"], "body": "Right column text" },
+    { "layout": "title-content", "title": "Data", "table": { "headers": ["Metric", "Q1", "Q2"], "rows": [["Revenue", "$1.2M", "$1.5M"]], "headerFill": "3B82F6", "headerColor": "FFFFFF" } },
+    { "layout": "title-content", "title": "Chart", "chart": { "type": "bar", "data": [{"name": "Sales", "labels": ["Q1","Q2","Q3"], "values": [100,150,200]}], "chartColors": ["3B82F6","10B981","F59E0B"] } }
+  ]
+}
+\`\`\`
+
+**Layouts**: \`title\`, \`title-content\` (default), \`section\`, \`two-column\`, \`blank\`, \`image-left\`, \`image-right\`.
+**Colors**: 6-char hex WITHOUT \`#\` prefix (e.g. \`"3B82F6"\`). Good palettes: Navy/Gold (\`"1A1A2E"\`/\`"D4AF37"\`), Teal/Coral (\`"0D9488"\`/\`"F97316"\`), Blue/White (\`"3B82F6"\`/\`"FFFFFF"\`).
+**Rules**: Start with \`title\` layout, end with summary. Use \`section\` dividers between topics. Keep 3-5 bullets per slide. Vary layouts — avoid repeating the same layout 3+ times. Avoid all-text slides.
 - When updating, use **read_artifact** first if the artifact content is not visible in the recent conversation, then **update_artifact** with the full new content.`;
 
   if (existingArtifacts && existingArtifacts.length > 0) {

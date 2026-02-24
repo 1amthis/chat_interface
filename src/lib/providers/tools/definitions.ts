@@ -206,7 +206,7 @@ export const CREATE_ARTIFACT_SCHEMA: ToolSchema = {
       },
       content: {
         type: 'string',
-        description: 'The full content of the artifact. For document: markdown or JSON blocks/sections. For spreadsheet: CSV/TSV, markdown table, array-of-objects JSON, or {sheets:{...}} JSON. For presentation: markdown slides separated by --- or JSON {slides:[...]}.',
+        description: 'The full content of the artifact. For document: markdown or JSON blocks/sections. For spreadsheet: CSV/TSV, markdown table, array-of-objects JSON, or {sheets:{...}} JSON. For presentation: JSON {"theme":{...},"slides":[{"layout":"title","title":"..."},{"layout":"title-content","title":"...","bullets":[...]},...]} for rich output, or markdown with --- slide breaks for basic output.',
       },
       language: {
         type: 'string',
