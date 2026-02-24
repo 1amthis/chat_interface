@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { ToolCall, WebSearchResponse } from '@/types';
+import { ToolCall, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
+import { MemorySearchResult } from '@/lib/memory-search/types';
+import { RAGSearchResult } from '@/lib/rag/types';
 
 // SQL result types (mirrors builtin-tools.ts shapes)
 interface SqlSelectResult {
@@ -169,6 +171,219 @@ function WebSearchResultsList({ response }: { response: WebSearchResponse }) {
   );
 }
 
+// --- Google Drive Search ---
+
+function tryParseGoogleDriveResponse(result: unknown): GoogleDriveSearchResponse | null {
+  if (!result || typeof result !== 'object') return null;
+  const obj = result as Record<string, unknown>;
+  if (typeof obj.query === 'string' && Array.isArray(obj.results) && typeof obj.timestamp === 'number') {
+    // Distinguish from WebSearchResponse by checking for Drive-specific fields
+    const first = obj.results[0];
+    if (!first || (first && typeof first === 'object' && 'fileName' in first)) {
+      return obj as unknown as GoogleDriveSearchResponse;
+    }
+  }
+  return null;
+}
+
+function getDriveFileIcon(mimeType: string): string {
+  if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return '📊';
+  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '📽️';
+  if (mimeType.includes('document') || mimeType.includes('word')) return '📝';
+  if (mimeType.includes('pdf')) return '📕';
+  if (mimeType.includes('image')) return '🖼️';
+  if (mimeType.includes('video')) return '🎬';
+  if (mimeType.includes('audio')) return '🎵';
+  if (mimeType.includes('folder')) return '📁';
+  if (mimeType.includes('form')) return '📋';
+  if (mimeType.includes('zip') || mimeType.includes('archive')) return '🗜️';
+  return '📄';
+}
+
+function formatRelativeDate(dateStr: string): string {
+  try {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+    if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
+    return `${Math.floor(diffDays / 365)}y ago`;
+  } catch {
+    return dateStr;
+  }
+}
+
+function GoogleDriveResultsList({ response }: { response: GoogleDriveSearchResponse }) {
+  if (response.results.length === 0) {
+    return (
+      <div className="tool-results-header">
+        No files found for &quot;{response.query}&quot;
+      </div>
+    );
+  }
+
+  return (
+    <div className="tool-call-results">
+      <div className="tool-results-header">
+        {response.results.length} file{response.results.length !== 1 ? 's' : ''} for &quot;{response.query}&quot;
+      </div>
+      <div className="tool-results-list">
+        {response.results.map((r, i) => (
+          <a
+            key={i}
+            href={r.webViewLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="tool-result-item"
+          >
+            <div className="tool-result-header-row">
+              <span className="tool-result-type-icon">{getDriveFileIcon(r.mimeType)}</span>
+              <span className="tool-result-title">{r.fileName}</span>
+            </div>
+            <div className="tool-result-meta">
+              {r.owner && <span>{r.owner}</span>}
+              {r.owner && <span className="tool-result-meta-sep">·</span>}
+              <span>{formatRelativeDate(r.modifiedTime)}</span>
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// --- Memory Search ---
+
+interface MemorySearchResponseData {
+  __memory_search__: true;
+  query: string;
+  results: MemorySearchResult[];
+}
+
+function tryParseMemorySearchResponse(result: unknown): MemorySearchResponseData | null {
+  if (!result || typeof result !== 'object') return null;
+  const obj = result as Record<string, unknown>;
+  if (obj.__memory_search__ === true && typeof obj.query === 'string' && Array.isArray(obj.results)) {
+    return obj as unknown as MemorySearchResponseData;
+  }
+  return null;
+}
+
+function formatTimestamp(ts: number): string {
+  try {
+    const date = new Date(ts);
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
+function MemorySearchResultsList({ response }: { response: MemorySearchResponseData }) {
+  if (response.results.length === 0) {
+    return (
+      <div className="tool-results-header">
+        No memories found for &quot;{response.query}&quot;
+      </div>
+    );
+  }
+
+  return (
+    <div className="tool-call-results">
+      <div className="tool-results-header">
+        {response.results.length} memory match{response.results.length !== 1 ? 'es' : ''} for &quot;{response.query}&quot;
+      </div>
+      <div className="tool-results-list">
+        {response.results.map((r, i) => (
+          <div key={i} className="tool-result-item tool-result-item-static">
+            <div className="tool-result-header-row">
+              <span className="tool-result-type-icon">💬</span>
+              <span className="tool-result-title tool-result-title-default">{r.conversationTitle}</span>
+            </div>
+            <div className="tool-result-meta">
+              <span>{r.role === 'user' ? 'You' : 'Assistant'}</span>
+              <span className="tool-result-meta-sep">·</span>
+              <span>{formatTimestamp(r.timestamp)}</span>
+              <span className="tool-result-meta-sep">·</span>
+              <span className="tool-result-score">{Math.round(r.score * 100)}% match</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// --- RAG Search ---
+
+interface RAGSearchResponseData {
+  __rag_search__: true;
+  query: string;
+  results: RAGSearchResult[];
+}
+
+function tryParseRAGSearchResponse(result: unknown): RAGSearchResponseData | null {
+  if (!result || typeof result !== 'object') return null;
+  const obj = result as Record<string, unknown>;
+  if (obj.__rag_search__ === true && typeof obj.query === 'string' && Array.isArray(obj.results)) {
+    return obj as unknown as RAGSearchResponseData;
+  }
+  return null;
+}
+
+function getDocumentIcon(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  switch (ext) {
+    case 'pdf': return '📕';
+    case 'doc': case 'docx': return '📝';
+    case 'xls': case 'xlsx': case 'csv': return '📊';
+    case 'ppt': case 'pptx': return '📽️';
+    case 'txt': case 'log': return '📄';
+    case 'md': case 'mdx': return '📓';
+    case 'json': case 'xml': case 'yaml': case 'yml': return '📋';
+    case 'html': case 'htm': return '🌐';
+    case 'js': case 'ts': case 'py': case 'rb': case 'go': case 'rs': case 'java': case 'c': case 'cpp': return '💻';
+    case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': return '🖼️';
+    default: return '📄';
+  }
+}
+
+function RAGSearchResultsList({ response }: { response: RAGSearchResponseData }) {
+  if (response.results.length === 0) {
+    return (
+      <div className="tool-results-header">
+        No documents found for &quot;{response.query}&quot;
+      </div>
+    );
+  }
+
+  return (
+    <div className="tool-call-results">
+      <div className="tool-results-header">
+        {response.results.length} passage{response.results.length !== 1 ? 's' : ''} for &quot;{response.query}&quot;
+      </div>
+      <div className="tool-results-list">
+        {response.results.map((r, i) => (
+          <div key={i} className="tool-result-item tool-result-item-static">
+            <div className="tool-result-header-row">
+              <span className="tool-result-type-icon">{getDocumentIcon(r.documentName)}</span>
+              <span className="tool-result-title tool-result-title-default">{r.documentName}</span>
+            </div>
+            <div className="tool-result-meta">
+              <span>Chunk {r.position + 1}</span>
+              <span className="tool-result-meta-sep">·</span>
+              <span className="tool-result-score">{Math.round(r.score * 100)}% relevance</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface ToolCallDisplayProps {
   toolCalls: ToolCall[];
   inline?: boolean;  // For inline display within message flow
@@ -296,10 +511,22 @@ function SingleToolCall({ toolCall, isExpanded, onToggle, inline }: SingleToolCa
             <div className="tool-call-section">
               <div className="tool-call-section-title">Result</div>
               {(() => {
-                // Check for web search response (object form)
-                const webSearch = name === 'web_search' ? tryParseWebSearchResponse(result) : null;
-                if (webSearch) {
-                  return <WebSearchResultsList response={webSearch} />;
+                // Check for structured search responses
+                if (name === 'web_search') {
+                  const webSearch = tryParseWebSearchResponse(result);
+                  if (webSearch) return <WebSearchResultsList response={webSearch} />;
+                }
+                if (name === 'google_drive_search') {
+                  const driveSearch = tryParseGoogleDriveResponse(result);
+                  if (driveSearch) return <GoogleDriveResultsList response={driveSearch} />;
+                }
+                if (name === 'memory_search') {
+                  const memorySearch = tryParseMemorySearchResponse(result);
+                  if (memorySearch) return <MemorySearchResultsList response={memorySearch} />;
+                }
+                if (name === 'rag_search') {
+                  const ragSearch = tryParseRAGSearchResponse(result);
+                  if (ragSearch) return <RAGSearchResultsList response={ragSearch} />;
                 }
                 const formatted = formatResult();
                 const sqlResult = tryParseSqlResult(formatted);

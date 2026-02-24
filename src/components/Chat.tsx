@@ -878,7 +878,7 @@ export function Chat() {
                 // Web search, Google Drive search, or Memory search - handle as proper tool results
                 const searchQuery = toolParams.query as string;
 
-                let searchResult: WebSearchResponse | GoogleDriveSearchResponse | null = null;
+                let searchResult: WebSearchResponse | GoogleDriveSearchResponse | Record<string, unknown> | null = null;
                 let formattedResult = '';
                 let isError = false;
 
@@ -924,6 +924,7 @@ export function Chat() {
                   const memoryResult = await performMemorySearch(searchQuery, conv.id);
                   if (memoryResult) {
                     formattedResult = memoryResult.formatted;
+                    searchResult = { __memory_search__: true, query: searchQuery, results: memoryResult.results };
                   } else {
                     formattedResult = 'Memory search failed. Please try again.';
                     isError = true;
@@ -932,6 +933,7 @@ export function Chat() {
                   const ragResult = await performRAGSearch(searchQuery);
                   if (ragResult) {
                     formattedResult = ragResult.formatted;
+                    searchResult = { __rag_search__: true, query: searchQuery, results: ragResult.results };
                   } else {
                     formattedResult = 'Document search failed. Please try again.';
                     isError = true;
@@ -1029,10 +1031,12 @@ export function Chat() {
                 let formattedResult = '';
                 let isError = false;
 
+                let structuredResult: unknown = null;
                 try {
                   if (tc.name === 'web_search') {
                     const result = await performSearch(tc.params.query as string);
                     if (result && result.results.length > 0) {
+                      structuredResult = result;
                       formattedResult = `Web search results for "${result.query}":\n\n`;
                       result.results.forEach((r, idx) => {
                         formattedResult += `[${idx + 1}] ${r.title}\n    URL: ${r.url}\n    ${r.snippet}\n\n`;
@@ -1043,6 +1047,7 @@ export function Chat() {
                   } else if (tc.name === 'google_drive_search') {
                     const result = await performDriveSearch(tc.params.query as string);
                     if (result && result.results.length > 0) {
+                      structuredResult = result;
                       formattedResult = `Google Drive search results for "${result.query}":\n\n`;
                       result.results.forEach((r, idx) => {
                         formattedResult += `[${idx + 1}] ${r.fileName} (${r.mimeType})\n`;
@@ -1057,6 +1062,7 @@ export function Chat() {
                     const result = await performMemorySearch(tc.params.query as string, conv.id);
                     if (result) {
                       formattedResult = result.formatted;
+                      structuredResult = { __memory_search__: true, query: tc.params.query, results: result.results };
                     } else {
                       formattedResult = 'Memory search failed.';
                       isError = true;
@@ -1065,6 +1071,7 @@ export function Chat() {
                     const result = await performRAGSearch(tc.params.query as string);
                     if (result) {
                       formattedResult = result.formatted;
+                      structuredResult = { __rag_search__: true, query: tc.params.query, results: result.results };
                     } else {
                       formattedResult = 'Document search failed.';
                       isError = true;
@@ -1102,19 +1109,19 @@ export function Chat() {
                   isError = true;
                 }
 
-                return { toolCall, tc, formattedResult, isError };
+                return { toolCall, tc, formattedResult, isError, structuredResult };
               });
 
               const results = await Promise.all(toolCallPromises);
 
               // Batch state updates after all promises resolve
-              for (const { toolCall, tc, formattedResult, isError } of results) {
+              for (const { toolCall, tc, formattedResult, isError, structuredResult } of results) {
                 const toolCallIndex = toolCallsAccumulator.findIndex(t => t.id === toolCall.id);
                 if (toolCallIndex !== -1) {
                   const updatedToolCall = {
                     ...toolCall,
                     status: isError ? 'error' as const : 'completed' as const,
-                    result: formattedResult,
+                    result: structuredResult || formattedResult,
                     error: isError ? formattedResult : undefined,
                     completedAt: Date.now(),
                   };
