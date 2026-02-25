@@ -74,6 +74,12 @@ export function ProjectDashboard({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Sync local instructions state when switching projects
+  useEffect(() => {
+    setInstructions(project.instructions || '');
+    setSaveStatus(null);
+  }, [project.id]);
+
   // Auto-save instructions with debounce
   useEffect(() => {
     if (instructions !== (project.instructions || '')) {
