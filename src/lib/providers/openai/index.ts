@@ -262,6 +262,7 @@ export async function* streamOpenAI(
         // Single tool call - use existing format for backwards compatibility
         yield {
           type: 'tool_call',
+          toolCallId: parsedToolCalls[0].id,
           toolName: parsedToolCalls[0].name,
           originalToolName: parsedToolCalls[0].originalName, // Keep prefixed name for API
           toolParams: parsedToolCalls[0].params,
@@ -669,6 +670,7 @@ export async function* streamOpenAIResponses(
 
           yield {
             type: 'tool_call',
+            toolCallId: fc.id,
             toolName,
             toolParams: args,
             toolSource,

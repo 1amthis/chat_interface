@@ -38,7 +38,22 @@ export async function* streamMistral(
 ): AsyncGenerator<StreamChunk> {
   if (!apiKey) throw new Error('Mistral API key is required');
 
-  const client = new OpenAI({ apiKey, baseURL: MISTRAL_BASE_URL });
+  // Use a custom fetch wrapper to capture Mistral's error response body,
+  // which the OpenAI SDK cannot parse (reports "no body" for 4xx errors).
+  const mistralFetch: typeof globalThis.fetch = async (url, init) => {
+    const response = await globalThis.fetch(url, init);
+    if (!response.ok) {
+      const body = await response.text();
+      console.error(`[Mistral] API error ${response.status}:`, body);
+      // Re-throw as an Error with the actual body so extractErrorMessage() can display it
+      throw new Error(
+        `[${response.status}] ${body || response.statusText}`
+      );
+    }
+    return response;
+  };
+
+  const client = new OpenAI({ apiKey, baseURL: MISTRAL_BASE_URL, fetch: mistralFetch });
 
   const allMessages: OpenAI.ChatCompletionMessageParam[] = [];
 
@@ -68,16 +83,19 @@ export async function* streamMistral(
 
     allMessages.push({
       role: 'assistant',
-      content: '',  // Mistral requires empty string, not null
+      content: null,
       tool_calls: toolCallsForAssistant,
     });
 
     for (const te of toolExecutions) {
+      // Mistral's ToolMessage schema accepts an optional `name` field.
+      // Use type assertion since the OpenAI SDK type doesn't include `name` for tool messages.
       allMessages.push({
         role: 'tool',
         tool_call_id: te.toolCallId,
         content: typeof te.result === 'string' ? te.result : JSON.stringify(te.result),
-      });
+        name: te.originalToolName || te.toolName,
+      } as OpenAI.ChatCompletionToolMessageParam);
     }
   }
 
@@ -267,6 +285,7 @@ export async function* streamMistral(
       if (parsedToolCalls.length === 1) {
         yield {
           type: 'tool_call',
+          toolCallId: parsedToolCalls[0].id,
           toolName: parsedToolCalls[0].name,
           originalToolName: parsedToolCalls[0].originalName,
           toolParams: parsedToolCalls[0].params,

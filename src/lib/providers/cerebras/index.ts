@@ -238,6 +238,7 @@ export async function* streamCerebras(
       if (parsedToolCalls.length === 1) {
         yield {
           type: 'tool_call',
+          toolCallId: parsedToolCalls[0].id,
           toolName: parsedToolCalls[0].name,
           originalToolName: parsedToolCalls[0].originalName,
           toolParams: parsedToolCalls[0].params,
