@@ -23,6 +23,7 @@ interface SidebarProps {
   onUpdateProjectProviderModel: (id: string, provider: Provider | undefined, model: string | undefined) => void;
   onMoveToProject: (conversationId: string, projectId: string | undefined) => void;
   onOpenKnowledgeBase: () => void;
+  onOpenArtifactLibrary: () => void;
   onOpenModelsConfig: () => void;
   onOpenConnectorsConfig: () => void;
 }
@@ -46,6 +47,7 @@ export function Sidebar({
   onUpdateProjectProviderModel,
   onMoveToProject,
   onOpenKnowledgeBase,
+  onOpenArtifactLibrary,
   onOpenModelsConfig,
   onOpenConnectorsConfig,
 }: SidebarProps) {
@@ -58,6 +60,7 @@ export function Sidebar({
   const [editingProjectSettings, setEditingProjectSettings] = useState<{ id: string; name: string; instructions: string; files: ProjectFile[]; provider?: Provider; model?: string } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ conversationId: string; x: number; y: number } | null>(null);
   const [moveDropdownId, setMoveDropdownId] = useState<string | null>(null);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [storagePercentage, setStoragePercentage] = useState(0);
 
@@ -657,14 +660,14 @@ export function Sidebar({
       <div className="p-3 border-t border-[var(--border-color)] space-y-2">
         {/* Storage indicator */}
         {storagePercentage > 0 && (
-          <div className="px-3 py-2 text-xs">
-            <div className="flex items-center justify-between mb-1">
+          <div className="px-3 py-1.5 text-xs">
+            <div className="flex items-center justify-between">
               <span className="text-gray-500">Storage</span>
               <span className={storagePercentage > 80 ? 'text-orange-500 font-medium' : 'text-gray-500'}>
                 {storagePercentage}%
               </span>
             </div>
-            <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div className="w-full h-1.5 mt-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all ${
                   storagePercentage > 90
@@ -677,8 +680,8 @@ export function Sidebar({
               />
             </div>
             {storagePercentage > 80 && (
-              <p className="mt-1 text-xs text-orange-600 dark:text-orange-400">
-                Consider deleting old conversations
+              <p className="mt-1 text-[11px] text-orange-600 dark:text-orange-400">
+                High usage
               </p>
             )}
           </div>
@@ -694,38 +697,71 @@ export function Sidebar({
           Knowledge Base
         </button>
         <button
-          onClick={onOpenModelsConfig}
+          onClick={onOpenArtifactLibrary}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border-color)] transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V7a2 2 0 012-2h3l2-2h5a2 2 0 012 2v12a2 2 0 01-2 2z" />
           </svg>
-          Models
+          Artifacts
         </button>
-        <button
-          onClick={onOpenConnectorsConfig}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border-color)] transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-          </svg>
-          Connectors
-        </button>
-        <button
-          onClick={onOpenSettings}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border-color)] transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-            />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          Settings
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setShowMoreMenu((v) => !v)}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border-color)] transition-colors"
+            aria-expanded={showMoreMenu}
+            aria-haspopup="menu"
+          >
+            <span className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              More
+            </span>
+            <svg className={`w-3 h-3 transition-transform ${showMoreMenu ? 'rotate-180' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
+
+          {showMoreMenu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
+              <div className="absolute bottom-full left-0 right-0 mb-1 z-50 bg-[var(--background)] border border-[var(--border-color)] rounded-lg shadow-lg py-1">
+                <button
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    onOpenModelsConfig();
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--border-color)]"
+                  role="menuitem"
+                >
+                  Models
+                </button>
+                <button
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    onOpenConnectorsConfig();
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--border-color)]"
+                  role="menuitem"
+                >
+                  Connectors
+                </button>
+                <button
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    onOpenSettings();
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--border-color)]"
+                  role="menuitem"
+                >
+                  Settings
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

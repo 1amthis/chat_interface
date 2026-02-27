@@ -86,7 +86,7 @@ export function buildArtifactSystemPrompt(existingArtifacts?: Artifact[]): strin
 You have access to artifact tools for creating and managing substantial content:
 
 - **create_artifact**: Create a new artifact (code, html, react, markdown, svg, mermaid, document, spreadsheet, presentation).
-- **update_artifact**: Replace an artifact's content with a new version. Always provide the complete content, not a diff.
+- **update_artifact**: Update an artifact using either full \`content\` replacement or a targeted \`patch\`.
 - **read_artifact**: Read an artifact's current content before editing it.
 
 ### When to use artifacts vs. inline code
@@ -97,10 +97,20 @@ You have access to artifact tools for creating and managing substantial content:
   - **spreadsheet** for XLSX output (CSV or JSON-table content)
   - **presentation** for PPTX output (rich JSON with theme, layouts, tables, charts)
 - Structured content formats that export best:
-  - **document**: markdown headings/lists/tables OR JSON with \`blocks\` / \`sections\`
+  - **document**: rich JSON with \`theme\`, \`title\`, and \`blocks\` array for rich output (preferred), or markdown for basic output
   - **spreadsheet**: CSV/TSV, markdown tables, array-of-objects JSON, or \`{ "sheets": { ... } }\`
   - **presentation**: JSON with \`theme\` and \`slides\` array for rich output (preferred), or markdown with \`---\` breaks for basic output
 - Optionally set \`output_format\` on create/update to hint preferred export target (\`source\`, \`docx\`, \`pdf\`, \`xlsx\`, \`pptx\`).
+- For localized edits, prefer \`update_artifact\` with \`patch\` instead of rewriting entire content.
+- Patch format (repeat blocks as needed):
+  \`\`\`
+  <<<<<<< SEARCH
+  exact old text
+  =======
+  new text
+  >>>>>>> REPLACE
+  \`\`\`
+- Each SEARCH block must match exactly once in the current artifact content.
 
 ### Presentation Design Guidelines
 
@@ -123,7 +133,37 @@ When creating presentations with \`type: "presentation"\`, output structured JSO
 **Layouts**: \`title\`, \`title-content\` (default), \`section\`, \`two-column\`, \`blank\`, \`image-left\`, \`image-right\`.
 **Colors**: 6-char hex WITHOUT \`#\` prefix (e.g. \`"3B82F6"\`). Good palettes: Navy/Gold (\`"1A1A2E"\`/\`"D4AF37"\`), Teal/Coral (\`"0D9488"\`/\`"F97316"\`), Blue/White (\`"3B82F6"\`/\`"FFFFFF"\`).
 **Rules**: Start with \`title\` layout, end with summary. Use \`section\` dividers between topics. Keep 3-5 bullets per slide. Vary layouts — avoid repeating the same layout 3+ times. Avoid all-text slides.
-- When updating, use **read_artifact** first if the artifact content is not visible in the recent conversation, then **update_artifact** with the full new content.`;
+- When updating, use **read_artifact** first if the artifact content is not visible in the recent conversation. Prefer **update_artifact** with \`patch\` for focused changes, and use full \`content\` only for broad rewrites.
+
+### Document Design Guidelines
+
+When creating documents with \`type: "document"\`, output structured JSON:
+
+\`\`\`json
+{
+  "theme": { "primaryColor": "1A1A2E", "bodyColor": "333333", "accentColor": "3B82F6", "headingFont": "Georgia", "bodyFont": "Calibri", "fontSize": 11, "lineSpacing": 1.15 },
+  "title": "Document Title",
+  "subtitle": "Optional subtitle or author line",
+  "header": "Optional Running Header",
+  "showPageNumbers": true,
+  "blocks": [
+    { "type": "heading", "text": "Introduction", "level": 2 },
+    { "type": "paragraph", "text": "A plain paragraph of body text." },
+    { "type": "paragraph", "text": [{ "text": "A paragraph with " }, { "text": "bold", "bold": true }, { "text": " and " }, { "text": "italic", "italic": true }, { "text": " formatting." }] },
+    { "type": "list", "items": ["First item", "Second item", "Third item"], "ordered": false },
+    { "type": "table", "table": { "headers": ["Metric", "Value"], "rows": [["Revenue", "$1.2M"], ["Growth", "15%"]], "headerFill": "3B82F6", "headerColor": "FFFFFF" } },
+    { "type": "code", "code": { "code": "const x = 42;", "language": "javascript" } },
+    { "type": "blockquote", "text": "An important quote or excerpt." },
+    { "type": "callout", "callout": { "text": "This is a helpful tip.", "type": "tip" } },
+    { "type": "break", "break": { "type": "page-break" } }
+  ]
+}
+\`\`\`
+
+**Block types**: \`heading\` (levels 1-6), \`paragraph\`, \`list\` (ordered/unordered), \`table\`, \`code\`, \`image\`, \`blockquote\`, \`callout\` (note/info/warning/tip), \`break\` (horizontal-rule/page-break).
+**Rich text**: Paragraph and heading \`text\` can be a plain string OR an array of text runs: \`[{ "text": "bold text", "bold": true }, { "text": "linked", "hyperlink": "https://..." }]\`. Runs support \`bold\`, \`italic\`, \`underline\`, \`strikethrough\`, \`color\`, \`hyperlink\`, \`code\`, \`superscript\`, \`subscript\`.
+**Colors**: 6-char hex WITHOUT \`#\` prefix (e.g. \`"3B82F6"\`).
+**Rules**: Start with a descriptive title. Use headings to organize hierarchically. Keep paragraphs focused. Use tables for structured data. Use callouts for important notes. Vary block types — avoid long runs of plain paragraphs.`;
 
   if (existingArtifacts && existingArtifacts.length > 0) {
     const listed = existingArtifacts.slice(-MAX_LISTED_ARTIFACTS);

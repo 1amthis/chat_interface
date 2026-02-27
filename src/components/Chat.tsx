@@ -26,6 +26,7 @@ import { TokenUsageDisplay } from './TokenUsageDisplay';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ProjectDashboard } from './ProjectDashboard';
 import { KnowledgeBase } from './KnowledgeBase';
+import { ArtifactLibrary } from './ArtifactLibrary';
 import { ModelsConfig } from './ModelsConfig';
 import { ConnectorsConfig } from './ConnectorsConfig';
 import { ArtifactPanel } from './ArtifactPanel';
@@ -108,6 +109,7 @@ export function Chat() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
+  const [showArtifactLibrary, setShowArtifactLibrary] = useState(false);
   const [showModelsConfig, setShowModelsConfig] = useState(false);
   const [showConnectorsConfig, setShowConnectorsConfig] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
@@ -239,6 +241,7 @@ export function Chat() {
     setCurrentProjectId(null);
     setCurrentConversation(null);
     setShowKnowledgeBase(false);
+    setShowArtifactLibrary(false);
     setShowModelsConfig(false);
     setShowConnectorsConfig(false);
     setStreamingContent('');
@@ -268,6 +271,7 @@ export function Chat() {
     setCurrentProjectId(null);
     setCurrentConversation(newConversation);
     setShowKnowledgeBase(false);
+    setShowArtifactLibrary(false);
     setShowModelsConfig(false);
     setShowConnectorsConfig(false);
     setStreamingContent('');
@@ -282,6 +286,7 @@ export function Chat() {
       setCurrentProjectId(null);
       setCurrentConversation(conv);
       setShowKnowledgeBase(false);
+      setShowArtifactLibrary(false);
       setShowModelsConfig(false);
       setShowConnectorsConfig(false);
       setStreamingContent('');
@@ -391,10 +396,41 @@ export function Chat() {
     alert('Google Drive file picker coming soon! For now, use the Google Drive search feature to find and reference files in your conversations.');
   }, []);
 
+  const handleOpenArtifactLibrary = useCallback(() => {
+    setShowArtifactLibrary(true);
+    setShowKnowledgeBase(false);
+    setShowModelsConfig(false);
+    setShowConnectorsConfig(false);
+    setCurrentConversation(null);
+    setCurrentProjectId(null);
+    resetArtifactPanel();
+  }, [resetArtifactPanel]);
+
+  const handleOpenArtifactFromLibrary = useCallback((conversationId: string, artifactId: string) => {
+    const conv = conversations.find((c) => c.id === conversationId);
+    if (!conv) return;
+
+    setShowArtifactLibrary(false);
+    setShowKnowledgeBase(false);
+    setShowModelsConfig(false);
+    setShowConnectorsConfig(false);
+    setCurrentProjectId(null);
+    setCurrentConversation(conv);
+    setStreamingContent('');
+    setLastUsage(null);
+    setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    resetArtifactPanel();
+
+    requestAnimationFrame(() => {
+      handleSelectArtifact(artifactId);
+    });
+  }, [conversations, handleSelectArtifact, resetArtifactPanel]);
+
   const handleSelectProject = useCallback((projectId: string) => {
     setCurrentProjectId(projectId);
     setCurrentConversation(null);
     setShowKnowledgeBase(false);
+    setShowArtifactLibrary(false);
     setShowModelsConfig(false);
     setShowConnectorsConfig(false);
     setStreamingContent('');
@@ -1459,24 +1495,33 @@ export function Chat() {
         onMoveToProject={handleMoveToProject}
         onOpenKnowledgeBase={() => {
           setShowKnowledgeBase(true);
+          setShowArtifactLibrary(false);
           setShowModelsConfig(false);
           setShowConnectorsConfig(false);
           setCurrentConversation(null);
           setCurrentProjectId(null);
+          resetArtifactPanel();
+        }}
+        onOpenArtifactLibrary={() => {
+          handleOpenArtifactLibrary();
         }}
         onOpenModelsConfig={() => {
           setShowModelsConfig(true);
+          setShowArtifactLibrary(false);
           setShowKnowledgeBase(false);
           setShowConnectorsConfig(false);
           setCurrentConversation(null);
           setCurrentProjectId(null);
+          resetArtifactPanel();
         }}
         onOpenConnectorsConfig={() => {
           setShowConnectorsConfig(true);
+          setShowArtifactLibrary(false);
           setShowModelsConfig(false);
           setShowKnowledgeBase(false);
           setCurrentConversation(null);
           setCurrentProjectId(null);
+          resetArtifactPanel();
         }}
       />
 
@@ -1491,6 +1536,8 @@ export function Chat() {
                 ? 'Models & Providers'
                 : showConnectorsConfig
                 ? 'Connectors'
+                : showArtifactLibrary
+                ? 'Artifact Library'
                 : showKnowledgeBase
                 ? 'Knowledge Base'
                 : currentProjectId
@@ -1514,7 +1561,7 @@ export function Chat() {
               </span>
             )}
           </div>
-          {!currentProjectId && !showKnowledgeBase && !showModelsConfig && !showConnectorsConfig && (
+          {!currentProjectId && !showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig && (
             <div className="flex items-center gap-4">
               <TokenUsageDisplay
                 sessionUsage={sessionUsage}
@@ -1571,6 +1618,13 @@ export function Chat() {
                 handleSaveSettings(newSettings);
               }}
               onClose={() => setShowConnectorsConfig(false)}
+            />
+          ) : showArtifactLibrary ? (
+            <ArtifactLibrary
+              conversations={conversations}
+              projects={projects}
+              onOpenArtifact={handleOpenArtifactFromLibrary}
+              onClose={() => setShowArtifactLibrary(false)}
             />
           ) : showKnowledgeBase ? (
             <KnowledgeBase
@@ -1669,7 +1723,7 @@ export function Chat() {
           <div ref={messagesEndRef} />
         </main>
 
-        {!currentProjectId && !showKnowledgeBase && !showModelsConfig && !showConnectorsConfig && (
+        {!currentProjectId && !showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig && (
           <div className="relative">
             {/* Scroll to bottom button */}
             {showScrollToBottom && (

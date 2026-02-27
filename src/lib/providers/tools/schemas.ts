@@ -109,7 +109,7 @@ export const CREATE_ARTIFACT_SCHEMA: ToolSchema = {
 
 export const UPDATE_ARTIFACT_SCHEMA: ToolSchema = {
   name: 'update_artifact',
-  description: 'Update an existing artifact with new content. Always provide the complete updated content, not a diff. Use read_artifact first if you need to see the current content. You may optionally update output_format.',
+  description: 'Update an existing artifact. Prefer targeted updates with `patch` (SEARCH/REPLACE blocks) for small edits, or use full `content` for full rewrites. Use read_artifact first if you need to see the current content. You may optionally update title/output_format.',
   parameters: {
     type: 'object',
     properties: {
@@ -119,7 +119,11 @@ export const UPDATE_ARTIFACT_SCHEMA: ToolSchema = {
       },
       content: {
         type: 'string',
-        description: 'The complete new content for the artifact (not a diff). Same supported formats as create_artifact.',
+        description: 'Optional complete new content for full replacement. Same supported formats as create_artifact.',
+      },
+      patch: {
+        type: 'string',
+        description: 'Optional diff-style patch using one or more SEARCH/REPLACE blocks: <<<<<<< SEARCH\\nexact old text\\n=======\\nnew text\\n>>>>>>> REPLACE',
       },
       title: {
         type: 'string',
@@ -131,7 +135,7 @@ export const UPDATE_ARTIFACT_SCHEMA: ToolSchema = {
         enum: ['source', 'docx', 'pdf', 'xlsx', 'pptx'],
       },
     },
-    required: ['artifact_id', 'content'],
+    required: ['artifact_id'],
   },
 };
 

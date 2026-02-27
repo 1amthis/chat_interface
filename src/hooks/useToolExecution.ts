@@ -56,6 +56,104 @@ export interface UseToolExecutionReturn {
   generateToolCallId: () => string;
 }
 
+interface SearchReplacePatchBlock {
+  search: string;
+  replace: string;
+}
+
+function normalizeLineEndings(value: string): string {
+  return value.replace(/\r\n/g, '\n');
+}
+
+function stripOptionalCodeFence(value: string): string {
+  const trimmed = value.trim();
+  const fencedMatch = trimmed.match(/^```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```$/);
+  return fencedMatch ? fencedMatch[1] : value;
+}
+
+function parseSearchReplacePatch(patch: string): SearchReplacePatchBlock[] {
+  const normalizedPatch = normalizeLineEndings(stripOptionalCodeFence(patch));
+  const lines = normalizedPatch.split('\n');
+  const blocks: SearchReplacePatchBlock[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    while (index < lines.length && lines[index].trim() === '') index += 1;
+    if (index >= lines.length) break;
+
+    if (lines[index].trim() !== '<<<<<<< SEARCH') {
+      throw new Error(`Invalid patch format at line ${index + 1}: expected "<<<<<<< SEARCH".`);
+    }
+    index += 1;
+
+    const searchLines: string[] = [];
+    while (index < lines.length && lines[index].trim() !== '=======') {
+      searchLines.push(lines[index]);
+      index += 1;
+    }
+
+    if (index >= lines.length) {
+      throw new Error('Invalid patch format: missing "=======" delimiter.');
+    }
+    index += 1; // Skip =======
+
+    const replaceLines: string[] = [];
+    while (index < lines.length && lines[index].trim() !== '>>>>>>> REPLACE') {
+      replaceLines.push(lines[index]);
+      index += 1;
+    }
+
+    if (index >= lines.length) {
+      throw new Error('Invalid patch format: missing ">>>>>>> REPLACE" delimiter.');
+    }
+    index += 1; // Skip >>>>>>> REPLACE
+
+    blocks.push({
+      search: searchLines.join('\n'),
+      replace: replaceLines.join('\n'),
+    });
+  }
+
+  if (blocks.length === 0) {
+    throw new Error('Patch is empty. Provide at least one SEARCH/REPLACE block.');
+  }
+
+  return blocks;
+}
+
+function applySearchReplacePatch(originalContent: string, patch: string): { content: string; appliedBlocks: number } {
+  const hadCRLF = /\r\n/.test(originalContent);
+  let content = normalizeLineEndings(originalContent);
+  const blocks = parseSearchReplacePatch(patch);
+
+  blocks.forEach((block, blockIndex) => {
+    if (!block.search) {
+      throw new Error(`Patch block #${blockIndex + 1} has empty SEARCH text.`);
+    }
+
+    const firstMatchIndex = content.indexOf(block.search);
+    if (firstMatchIndex === -1) {
+      throw new Error(`Patch block #${blockIndex + 1} SEARCH text was not found in the artifact.`);
+    }
+
+    const nextMatchIndex = content.indexOf(block.search, firstMatchIndex + block.search.length);
+    if (nextMatchIndex !== -1) {
+      throw new Error(`Patch block #${blockIndex + 1} SEARCH text is ambiguous (matches multiple locations). Add more context.`);
+    }
+
+    content = `${content.slice(0, firstMatchIndex)}${block.replace}${content.slice(firstMatchIndex + block.search.length)}`;
+  });
+
+  if (hadCRLF) {
+    content = content.replace(/\n/g, '\r\n');
+  }
+
+  return {
+    content,
+    appliedBlocks: blocks.length,
+  };
+}
+
 export function useToolExecution({
   settings,
   setSettings,
@@ -375,12 +473,13 @@ export function useToolExecution({
 
     if (toolName === 'update_artifact') {
       const artifactId = params.artifact_id as string;
-      const content = params.content as string;
+      const content = params.content as string | undefined;
+      const patch = params.patch as string | undefined;
       const newTitle = params.title as string | undefined;
       const outputFormat = params.output_format as ArtifactOutputFormat | undefined;
 
-      if (!artifactId || !content) {
-        return { result: 'Error: update_artifact requires artifact_id and content parameters.', isError: true };
+      if (!artifactId || (!content && !patch)) {
+        return { result: 'Error: update_artifact requires artifact_id and either content or patch.', isError: true };
       }
       if (outputFormat && !VALID_OUTPUT_FORMATS.includes(outputFormat)) {
         return { result: `Error: Invalid output_format "${outputFormat}". Valid formats: ${VALID_OUTPUT_FORMATS.join(', ')}`, isError: true };
@@ -395,6 +494,29 @@ export function useToolExecution({
         };
       }
 
+      let nextContent = content;
+      let updateMode: 'replace' | 'patch' = 'replace';
+      let appliedPatchBlocks: number | undefined;
+
+      if (!nextContent && patch) {
+        try {
+          const patched = applySearchReplacePatch(existing.content, patch);
+          nextContent = patched.content;
+          updateMode = 'patch';
+          appliedPatchBlocks = patched.appliedBlocks;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown patch error';
+          return {
+            result: `Error: Failed to apply patch. ${message}`,
+            isError: true,
+          };
+        }
+      }
+
+      if (!nextContent) {
+        return { result: 'Error: update_artifact could not determine updated content.', isError: true };
+      }
+
       // Push current content to versions
       const version: ArtifactVersion = {
         id: generateId(),
@@ -404,7 +526,7 @@ export function useToolExecution({
 
       const updatedArtifact: Artifact = {
         ...existing,
-        content,
+        content: nextContent,
         title: newTitle || existing.title,
         preferredExportFormat: outputFormat || existing.preferredExportFormat,
         versions: [...existing.versions, version],
@@ -417,6 +539,8 @@ export function useToolExecution({
           artifact_id: updatedArtifact.id,
           title: updatedArtifact.title,
           version: updatedArtifact.versions.length,
+          update_mode: updateMode,
+          patch_blocks: appliedPatchBlocks,
           output_format: updatedArtifact.preferredExportFormat,
         }),
         isError: false,
