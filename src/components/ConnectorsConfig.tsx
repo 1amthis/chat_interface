@@ -1,8 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { ChatSettings, MCPServerConfig, BuiltinToolsConfig } from '@/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BuiltinToolsConfig, ChatSettings, MCPServerConfig, MCPServerStatus, ToolSource, UnifiedTool } from '@/types';
 import { getGoogleAuthUrl, isGoogleDriveConfigured } from '@/lib/googledrive';
+import {
+  CREATE_ARTIFACT_SCHEMA,
+  GOOGLE_DRIVE_SCHEMA,
+  MEMORY_SEARCH_SCHEMA,
+  RAG_SEARCH_SCHEMA,
+  READ_ARTIFACT_SCHEMA,
+  UPDATE_ARTIFACT_SCHEMA,
+  WEB_SEARCH_SCHEMA,
+} from '@/lib/providers/tools/schemas';
+import type { ToolSchema } from '@/lib/providers/tools/schemas';
 import { MCPSettingsSection } from './MCPSettingsSection';
 
 interface ConnectorsConfigProps {
@@ -10,6 +20,70 @@ interface ConnectorsConfigProps {
   onSettingsChange: (settings: Partial<ChatSettings>) => void;
   onClose: () => void;
 }
+
+interface ConnectorToolGroup {
+  id: string;
+  label: string;
+  source: ToolSource;
+  tools: UnifiedTool[];
+  serverId?: string;
+}
+
+interface CatalogParameter {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+  enumValues: string[];
+  schemaPreview?: string;
+}
+
+interface MCPToolsResponse {
+  servers?: MCPServerStatus[];
+  tools?: UnifiedTool[];
+  error?: string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const schemaToUnifiedTool = (source: ToolSource, schema: ToolSchema): UnifiedTool => ({
+  source,
+  name: schema.name,
+  description: schema.description,
+  parameters: {
+    type: 'object',
+    properties: schema.parameters.properties,
+    required: schema.parameters.required,
+  },
+});
+
+const sortToolsByName = (tools: UnifiedTool[]): UnifiedTool[] =>
+  [...tools].sort((a, b) => a.name.localeCompare(b.name));
+
+const getCatalogParameters = (tool: UnifiedTool): CatalogParameter[] => {
+  const properties = isRecord(tool.parameters) && isRecord(tool.parameters.properties)
+    ? tool.parameters.properties
+    : {};
+  const required = new Set(Array.isArray(tool.parameters?.required) ? tool.parameters.required : []);
+
+  return Object.entries(properties).map(([name, rawSchema]) => {
+    const schema = isRecord(rawSchema) ? rawSchema : {};
+    const rawEnum = Array.isArray(schema.enum) ? schema.enum : [];
+    const enumValues = rawEnum.filter((value): value is string => typeof value === 'string');
+
+    const hasNestedShape = schema.type === 'object' || schema.type === 'array' || isRecord(schema.properties) || schema.items !== undefined;
+
+    return {
+      name,
+      type: typeof schema.type === 'string' ? schema.type : 'unknown',
+      required: required.has(name),
+      description: typeof schema.description === 'string' ? schema.description : 'No description provided.',
+      enumValues,
+      schemaPreview: hasNestedShape ? JSON.stringify(rawSchema, null, 2) : undefined,
+    };
+  });
+};
 
 export function ConnectorsConfig({ settings, onSettingsChange, onClose }: ConnectorsConfigProps) {
   const [googleDriveConfigured, setGoogleDriveConfigured] = useState(false);
@@ -24,10 +98,218 @@ export function ConnectorsConfig({ settings, onSettingsChange, onClose }: Connec
     message: string;
     tables?: { tableName: string; rowCount: number; columns: number }[];
   } | null>(null);
+  const [dynamicTools, setDynamicTools] = useState<UnifiedTool[]>([]);
+  const [mcpServerStatuses, setMcpServerStatuses] = useState<MCPServerStatus[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogUpdatedAt, setCatalogUpdatedAt] = useState<number | null>(null);
+  const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const latestCatalogRequestId = useRef(0);
 
   useEffect(() => {
     setGoogleDriveConfigured(isGoogleDriveConfigured());
   }, []);
+
+  const loadDynamicTools = useCallback(async (showLoading: boolean = true) => {
+    const requestId = ++latestCatalogRequestId.current;
+    if (showLoading) {
+      setCatalogLoading(true);
+    }
+    setCatalogError(null);
+
+    try {
+      const response = await fetch('/api/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mcpServers: settings.mcpEnabled ? (settings.mcpServers || []) : [],
+          builtinTools: settings.builtinTools || {},
+        }),
+      });
+
+      const payload = await response.json() as MCPToolsResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to load tools');
+      }
+
+      if (requestId !== latestCatalogRequestId.current) {
+        return;
+      }
+
+      setDynamicTools(Array.isArray(payload.tools) ? payload.tools : []);
+      setMcpServerStatuses(Array.isArray(payload.servers) ? payload.servers : []);
+      setCatalogUpdatedAt(Date.now());
+    } catch (error) {
+      if (requestId !== latestCatalogRequestId.current) {
+        return;
+      }
+      setCatalogError(error instanceof Error ? error.message : 'Failed to load tool catalog');
+    } finally {
+      if (showLoading && requestId === latestCatalogRequestId.current) {
+        setCatalogLoading(false);
+      }
+    }
+  }, [settings.builtinTools, settings.mcpEnabled, settings.mcpServers]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void loadDynamicTools(true);
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [loadDynamicTools]);
+
+  const staticConnectorGroups = useMemo<ConnectorToolGroup[]>(() => {
+    const groups: ConnectorToolGroup[] = [];
+
+    if (settings.webSearchEnabled) {
+      groups.push({
+        id: 'web_search',
+        label: 'Web Search',
+        source: 'web_search',
+        tools: [schemaToUnifiedTool('web_search', WEB_SEARCH_SCHEMA)],
+      });
+    }
+
+    if (settings.googleDriveEnabled && settings.googleDriveAccessToken) {
+      groups.push({
+        id: 'google_drive',
+        label: 'Google Drive Search',
+        source: 'google_drive',
+        tools: [schemaToUnifiedTool('google_drive', GOOGLE_DRIVE_SCHEMA)],
+      });
+    }
+
+    if (settings.memorySearchEnabled) {
+      groups.push({
+        id: 'memory_search',
+        label: 'Memory Search',
+        source: 'memory_search',
+        tools: [schemaToUnifiedTool('memory_search', MEMORY_SEARCH_SCHEMA)],
+      });
+    }
+
+    if (settings.ragEnabled) {
+      groups.push({
+        id: 'rag_search',
+        label: 'Document Search (RAG)',
+        source: 'rag_search',
+        tools: [schemaToUnifiedTool('rag_search', RAG_SEARCH_SCHEMA)],
+      });
+    }
+
+    if (settings.artifactsEnabled !== false) {
+      groups.push({
+        id: 'artifact',
+        label: 'Artifacts',
+        source: 'artifact',
+        tools: sortToolsByName([
+          schemaToUnifiedTool('artifact', CREATE_ARTIFACT_SCHEMA),
+          schemaToUnifiedTool('artifact', UPDATE_ARTIFACT_SCHEMA),
+          schemaToUnifiedTool('artifact', READ_ARTIFACT_SCHEMA),
+        ]),
+      });
+    }
+
+    return groups;
+  }, [
+    settings.artifactsEnabled,
+    settings.googleDriveAccessToken,
+    settings.googleDriveEnabled,
+    settings.memorySearchEnabled,
+    settings.ragEnabled,
+    settings.webSearchEnabled,
+  ]);
+
+  const builtinGroup = useMemo<ConnectorToolGroup | null>(() => {
+    const builtinTools = sortToolsByName(dynamicTools.filter((tool) => tool.source === 'builtin'));
+    if (builtinTools.length === 0) {
+      return null;
+    }
+
+    return {
+      id: 'builtin_tools',
+      label: 'Built-in Tools',
+      source: 'builtin',
+      tools: builtinTools,
+    };
+  }, [dynamicTools]);
+
+  const mcpGroups = useMemo<ConnectorToolGroup[]>(() => {
+    if (!settings.mcpEnabled) {
+      return [];
+    }
+
+    const toolsByServer = new Map<string, UnifiedTool[]>();
+    for (const tool of dynamicTools) {
+      if (tool.source !== 'mcp' || !tool.serverId) {
+        continue;
+      }
+      const existing = toolsByServer.get(tool.serverId) || [];
+      existing.push(tool);
+      toolsByServer.set(tool.serverId, existing);
+    }
+
+    if (toolsByServer.size === 0) {
+      return [];
+    }
+
+    const configuredServers = settings.mcpServers || [];
+    const orderedConfiguredServerIds = configuredServers
+      .filter((server) => server.enabled)
+      .map((server) => server.id)
+      .filter((serverId) => toolsByServer.has(serverId));
+    const unknownServerIds = Array.from(toolsByServer.keys())
+      .filter((serverId) => !orderedConfiguredServerIds.includes(serverId))
+      .sort();
+
+    const serverNameById = new Map<string, string>();
+    for (const server of configuredServers) {
+      serverNameById.set(server.id, server.name);
+    }
+    for (const status of mcpServerStatuses) {
+      if (!serverNameById.has(status.id)) {
+        serverNameById.set(status.id, status.name);
+      }
+    }
+
+    return [...orderedConfiguredServerIds, ...unknownServerIds].map((serverId) => ({
+      id: `mcp_server_${serverId}`,
+      label: `MCP: ${serverNameById.get(serverId) || serverId}`,
+      source: 'mcp',
+      serverId,
+      tools: sortToolsByName(toolsByServer.get(serverId) || []),
+    }));
+  }, [dynamicTools, mcpServerStatuses, settings.mcpEnabled, settings.mcpServers]);
+
+  const connectorToolGroups = useMemo<ConnectorToolGroup[]>(() => {
+    const groups: ConnectorToolGroup[] = [...staticConnectorGroups];
+    if (builtinGroup) {
+      groups.push(builtinGroup);
+    }
+    groups.push(...mcpGroups);
+    return groups;
+  }, [builtinGroup, mcpGroups, staticConnectorGroups]);
+
+  const totalToolCount = useMemo(
+    () => connectorToolGroups.reduce((count, group) => count + group.tools.length, 0),
+    [connectorToolGroups]
+  );
+
+  const hasEnabledMCPServers = useMemo(
+    () => (settings.mcpServers || []).some((server) => server.enabled),
+    [settings.mcpServers]
+  );
+
+  const handleRefreshCatalog = () => {
+    void loadDynamicTools(true);
+  };
+
+  const handleToggleToolExpanded = (groupId: string, toolName: string) => {
+    const key = `${groupId}:${toolName}`;
+    setExpandedTools((current) => ({ ...current, [key]: !current[key] }));
+  };
 
   const handleSqliteTest = async () => {
     const dbPath = settings.builtinTools?.sqlite?.databasePath;
@@ -545,6 +827,141 @@ export function ConnectorsConfig({ settings, onSettingsChange, onClose }: Connec
               />
             </button>
           </div>
+        </section>
+
+        {/* Available Tools Catalog */}
+        <section className="p-4 rounded-xl border border-[var(--border-color)]">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-medium">Available Tools</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Inspect tools and parameter schemas currently available to the model.
+              </p>
+            </div>
+            <button
+              onClick={handleRefreshCatalog}
+              disabled={catalogLoading}
+              className="px-3 py-1.5 text-sm rounded-lg border border-[var(--border-color)] hover:bg-[var(--hover-background)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {catalogLoading ? 'Refreshing…' : 'Refresh tools'}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 mt-3 text-xs text-gray-500">
+            <span className="px-2 py-0.5 rounded bg-[var(--hover-background)]">
+              {connectorToolGroups.length} connector{connectorToolGroups.length !== 1 ? 's' : ''}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-[var(--hover-background)]">
+              {totalToolCount} tool{totalToolCount !== 1 ? 's' : ''}
+            </span>
+            {catalogUpdatedAt && (
+              <span className="px-2 py-0.5 rounded bg-[var(--hover-background)]">
+                Updated {new Date(catalogUpdatedAt).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+
+          {catalogError && (
+            <div className="mt-3 p-2 rounded text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/50">
+              Failed to load dynamic MCP/Built-in tools: {catalogError}
+            </div>
+          )}
+
+          {connectorToolGroups.length === 0 ? (
+            <p className="text-sm text-gray-500 mt-4">
+              No enabled connectors expose tools yet.
+            </p>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {connectorToolGroups.map((group) => (
+                <div key={group.id} className="rounded-lg border border-[var(--border-color)] overflow-hidden">
+                  <div className="px-3 py-2 border-b border-[var(--border-color)] bg-[var(--hover-background)] flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-medium truncate">{group.label}</span>
+                      {group.serverId && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                          server
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-500">{group.tools.length} tool{group.tools.length !== 1 ? 's' : ''}</span>
+                  </div>
+
+                  <div className="p-2 space-y-2">
+                    {group.tools.map((tool) => {
+                      const toolKey = `${group.id}:${tool.name}`;
+                      const expanded = expandedTools[toolKey] || false;
+                      const parameters = getCatalogParameters(tool);
+
+                      return (
+                        <div key={toolKey} className="rounded-md border border-[var(--border-color)]">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleToolExpanded(group.id, tool.name)}
+                            className="w-full px-3 py-2 text-left flex items-start justify-between gap-3 hover:bg-[var(--hover-background)] transition-colors"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-mono text-xs font-medium truncate">{tool.name}</p>
+                              <p className="text-xs text-gray-500 mt-1 line-clamp-2">{tool.description || 'No description provided.'}</p>
+                            </div>
+                            <svg
+                              className={`w-4 h-4 mt-0.5 text-gray-500 transition-transform shrink-0 ${expanded ? 'rotate-180' : ''}`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+
+                          {expanded && (
+                            <div className="px-3 pb-3 pt-2 border-t border-[var(--border-color)] space-y-2">
+                              {parameters.length === 0 ? (
+                                <p className="text-xs text-gray-500">This tool has no parameters.</p>
+                              ) : (
+                                parameters.map((parameter) => (
+                                  <div key={parameter.name} className="rounded-md bg-[var(--hover-background)] p-2">
+                                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                                      <span className="font-mono font-medium">{parameter.name}</span>
+                                      <span className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                                        {parameter.type}
+                                      </span>
+                                      {parameter.required && (
+                                        <span className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
+                                          required
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">{parameter.description}</p>
+                                    {parameter.enumValues.length > 0 && (
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        Enum: <span className="font-mono">{parameter.enumValues.join(', ')}</span>
+                                      </p>
+                                    )}
+                                    {parameter.schemaPreview && (
+                                      <pre className="mt-2 text-[11px] leading-4 font-mono whitespace-pre-wrap break-all bg-[var(--background)] rounded border border-[var(--border-color)] p-2 max-h-40 overflow-auto">
+                                        {parameter.schemaPreview}
+                                      </pre>
+                                    )}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {settings.mcpEnabled && hasEnabledMCPServers && mcpGroups.length === 0 && !catalogLoading && (
+            <p className="text-xs text-gray-500 mt-3">
+              No MCP tools found yet. Use Test in the MCP Tools section to validate server connections.
+            </p>
+          )}
         </section>
 
         {/* MCP Tools */}
