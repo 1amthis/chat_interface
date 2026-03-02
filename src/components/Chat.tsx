@@ -200,6 +200,8 @@ export function Chat() {
     setConversations,
     currentConversation,
     setCurrentConversation,
+    currentProjectId,
+    setCurrentProjectId,
   });
 
   const {
@@ -1706,9 +1708,9 @@ export function Chat() {
               }}
               onClose={() => setShowKnowledgeBase(false)}
             />
-          ) : currentProjectId ? (
+          ) : currentProjectId && activeProject ? (
             <ProjectDashboard
-              project={activeProject!}
+              project={activeProject}
               conversations={conversations.filter(c => c.projectId === currentProjectId)}
               onSelectConversation={handleSelectConversation}
               onSendMessage={(message, attachments) => handleSendInProject(currentProjectId, message, attachments)}

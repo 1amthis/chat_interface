@@ -19,6 +19,8 @@ export interface UseProjectsOptions {
   setConversations: (convs: Conversation[]) => void;
   currentConversation: Conversation | null;
   setCurrentConversation: (conv: Conversation | null) => void;
+  currentProjectId: string | null;
+  setCurrentProjectId: (id: string | null) => void;
 }
 
 export interface UseProjectsReturn {
@@ -37,6 +39,8 @@ export function useProjects({
   setConversations,
   currentConversation,
   setCurrentConversation,
+  currentProjectId,
+  setCurrentProjectId,
 }: UseProjectsOptions): UseProjectsReturn {
   const handleCreateProject = useCallback((name: string, color: string) => {
     const project: Project = {
@@ -53,7 +57,13 @@ export function useProjects({
     deleteProjectStorage(id);
     setProjects(getProjects());
     setConversations(getConversations());
-  }, [setProjects, setConversations]);
+    if (currentProjectId === id) {
+      setCurrentProjectId(null);
+    }
+    if (currentConversation?.projectId === id) {
+      setCurrentConversation({ ...currentConversation, projectId: undefined });
+    }
+  }, [currentProjectId, currentConversation, setCurrentConversation, setCurrentProjectId, setProjects, setConversations]);
 
   const handleRenameProject = useCallback((id: string, name: string) => {
     const project = projects.find((p) => p.id === id);
