@@ -19,6 +19,7 @@ export {
   isOpenAIReasoningModel,
   generateGeminiToolCallId,
   buildArtifactSystemPrompt,
+  buildCitationSystemPrompt,
   isArtifactTool,
   // Tool definitions (for advanced use cases)
   WEB_SEARCH_SCHEMA,

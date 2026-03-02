@@ -205,10 +205,16 @@ export function formatRAGResultsForAI(results: RAGSearchResult[]): string {
 
   results.forEach((result, index) => {
     const relevance = Math.round(result.score * 100);
-    output += `[${index + 1}] From "${result.documentName}" (chunk ${result.position + 1}):\n`;
-    output += `${result.chunkContent}\n`;
+    const citationKey = `doc-${index + 1}`;
+    output += `[${citationKey}] From "${result.documentName}" (chunk ${result.position + 1}):\n`;
+    output += `Excerpt: ${result.chunkContent}\n`;
     output += `Relevance: ${relevance}%\n\n`;
   });
+
+  output += `Citation requirements for your next answer:\n`;
+  output += `- If you use a passage, cite it inline with its key (example: [doc-1]).\n`;
+  output += `- End with a "Sources" section that lists only cited [doc-#] entries and their document + chunk.\n`;
+  output += `- Do not invent citations.\n`;
 
   return output.trim();
 }

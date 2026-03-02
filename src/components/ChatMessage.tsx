@@ -1,12 +1,106 @@
 'use client';
 
-import { useState } from 'react';
-import { Message, Attachment, ContentBlock, Artifact, ReasoningContentBlock, ContextBreakdown } from '@/types';
-import { MarkdownMessage } from './MarkdownMessage';
+import { useMemo, useState } from 'react';
+import { Message, Attachment, ContentBlock, Artifact, ReasoningContentBlock, ContextBreakdown, WebSearchResponse, ToolCall } from '@/types';
+import { MarkdownMessage, CitationSourceMap } from './MarkdownMessage';
 import ToolCallDisplay from './ToolCallDisplay';
 import { ArtifactCard } from './ArtifactCard';
 import { MessageUsageDisplay } from './MessageUsageDisplay';
 import { formatFileSize } from '@/lib/utils';
+
+interface RAGSearchResponseData {
+  __rag_search__: true;
+  query: string;
+  results: Array<{
+    documentName: string;
+    chunkContent: string;
+    position: number;
+    score: number;
+  }>;
+}
+
+function tryParseWebSearchResponse(result: unknown): WebSearchResponse | null {
+  if (result && typeof result === 'object') {
+    const obj = result as Record<string, unknown>;
+    if (typeof obj.query === 'string' && Array.isArray(obj.results) && typeof obj.timestamp === 'number') {
+      return obj as unknown as WebSearchResponse;
+    }
+  }
+  if (typeof result === 'string') {
+    try {
+      const parsed = JSON.parse(result);
+      if (parsed && typeof parsed.query === 'string' && Array.isArray(parsed.results)) {
+        return parsed as WebSearchResponse;
+      }
+    } catch {
+      // Not a JSON payload
+    }
+  }
+  return null;
+}
+
+function tryParseRAGSearchResponse(result: unknown): RAGSearchResponseData | null {
+  if (result && typeof result === 'object') {
+    const obj = result as Record<string, unknown>;
+    if (obj.__rag_search__ === true && typeof obj.query === 'string' && Array.isArray(obj.results)) {
+      return obj as unknown as RAGSearchResponseData;
+    }
+  }
+  if (typeof result === 'string') {
+    try {
+      const parsed = JSON.parse(result);
+      if (parsed && parsed.__rag_search__ === true && typeof parsed.query === 'string' && Array.isArray(parsed.results)) {
+        return parsed as RAGSearchResponseData;
+      }
+    } catch {
+      // Not a JSON payload
+    }
+  }
+  return null;
+}
+
+function buildCitationSources(toolCalls?: ToolCall[]): CitationSourceMap {
+  const sources: CitationSourceMap = {};
+  if (!toolCalls || toolCalls.length === 0) return sources;
+
+  toolCalls.forEach((toolCall) => {
+    if (toolCall.status !== 'completed') return;
+
+    if (toolCall.name === 'web_search') {
+      const parsed = tryParseWebSearchResponse(toolCall.result);
+      if (!parsed) return;
+      parsed.results.forEach((result, index) => {
+        const key = `web-${index + 1}`;
+        sources[key] = {
+          type: 'web',
+          key,
+          title: result.title,
+          url: result.url,
+          source: result.source,
+          snippet: result.snippet,
+        };
+      });
+    }
+
+    if (toolCall.name === 'rag_search') {
+      const parsed = tryParseRAGSearchResponse(toolCall.result);
+      if (!parsed) return;
+      parsed.results.forEach((result, index) => {
+        const key = `doc-${index + 1}`;
+        sources[key] = {
+          type: 'doc',
+          key,
+          documentName: result.documentName,
+          chunk: result.position + 1,
+          excerpt: result.chunkContent,
+          score: result.score,
+        };
+      });
+    }
+  });
+
+  return sources;
+}
 
 // Reasoning display component for o-series models
 function ReasoningDisplay({ reasoning, isStreaming }: { reasoning: string; isStreaming?: boolean }) {
@@ -52,10 +146,11 @@ interface ContentBlocksRendererProps {
   blocks: ContentBlock[];
   artifacts?: Artifact[];
   onSelectArtifact?: (artifactId: string) => void;
+  citationSources?: CitationSourceMap;
 }
 
 // Renders content blocks in order (text, reasoning, tool calls, and artifacts interleaved)
-function ContentBlocksRenderer({ blocks, artifacts, onSelectArtifact }: ContentBlocksRendererProps) {
+function ContentBlocksRenderer({ blocks, artifacts, onSelectArtifact, citationSources }: ContentBlocksRendererProps) {
   // Check if this is the last reasoning block (for streaming indicator)
   const lastReasoningIndex = blocks.map((b, i) => b.type === 'reasoning' ? i : -1).filter(i => i >= 0).pop();
   const hasContentAfterLastReasoning = lastReasoningIndex !== undefined &&
@@ -66,7 +161,7 @@ function ContentBlocksRenderer({ blocks, artifacts, onSelectArtifact }: ContentB
       {blocks.map((block, index) => {
         if (block.type === 'text') {
           return block.text ? (
-            <MarkdownMessage key={index} content={block.text} />
+            <MarkdownMessage key={index} content={block.text} citationSources={citationSources} />
           ) : null;
         } else if (block.type === 'reasoning') {
           const reasoningBlock = block as ReasoningContentBlock;
@@ -220,6 +315,12 @@ export function ChatMessage({
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [copied, setCopied] = useState(false);
+  const citationSources = useMemo(() => buildCitationSources(
+    message.toolCalls ||
+    message.contentBlocks
+      ?.filter((block) => block.type === 'tool_call')
+      .map((block) => block.toolCall)
+  ), [message.toolCalls, message.contentBlocks]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(message.content);
@@ -358,13 +459,14 @@ export function ChatMessage({
                     blocks={message.contentBlocks}
                     artifacts={artifacts}
                     onSelectArtifact={onSelectArtifact}
+                    citationSources={citationSources}
                   />
                 ) : (
                   <>
                     {message.toolCalls && message.toolCalls.length > 0 && (
                       <ToolCallDisplay toolCalls={message.toolCalls} inline />
                     )}
-                    {message.content && <MarkdownMessage content={message.content} />}
+                    {message.content && <MarkdownMessage content={message.content} citationSources={citationSources} />}
                   </>
                 )}
               </>

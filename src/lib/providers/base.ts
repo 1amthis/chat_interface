@@ -75,6 +75,28 @@ export function generateGeminiToolCallId(): string {
 }
 
 /**
+ * Build system prompt instructions for citing external sources.
+ */
+export function buildCitationSystemPrompt(
+  webSearchEnabled?: boolean,
+  ragEnabled?: boolean
+): string | undefined {
+  if (!webSearchEnabled && !ragEnabled) {
+    return undefined;
+  }
+
+  return `## Source Citation
+
+When you use facts from tool results, cite sources inline immediately after the claim.
+
+- For web_search results, cite using the provided keys like \`[web-1]\`.
+- For rag_search (uploaded documents), cite using the provided keys like \`[doc-1]\`.
+- Never invent citation keys. Only cite keys that were provided in tool results.
+- End answers that use external sources with a **Sources** section listing only cited keys.
+- If no source supports a claim, say that clearly instead of citing.`;
+}
+
+/**
  * Build system prompt instructions for artifact tools.
  * Includes guidance on when to use artifact tools and a list of existing artifacts.
  */

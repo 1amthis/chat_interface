@@ -14,7 +14,7 @@ import {
   getProjects,
   addUsageRecord,
 } from '@/lib/storage';
-import { mergeSystemPrompts, buildArtifactSystemPrompt, isArtifactTool, isOpenAIReasoningModel } from '@/lib/providers';
+import { mergeSystemPrompts, buildArtifactSystemPrompt, buildCitationSystemPrompt, isArtifactTool, isOpenAIReasoningModel } from '@/lib/providers';
 import { getActivePath, getSiblings, getDefaultLeaf, ensureTreeStructure } from '@/lib/conversation-tree';
 import { processStreamingChunk } from '@/lib/artifact-parser';
 import { MAX_TOOL_RECURSION_DEPTH } from '@/lib/constants';
@@ -97,6 +97,28 @@ function isThinkingEnabled(settings: ChatSettings, provider: Provider, model: st
   }
 
   return false;
+}
+
+function formatWebSearchResultsForToolResponse(result: WebSearchResponse): string {
+  if (result.results.length === 0) {
+    return `Web search for "${result.query}" returned no results.`;
+  }
+
+  let formatted = `Web search results for "${result.query}":\n\n`;
+  result.results.forEach((r, i) => {
+    const citationKey = `web-${i + 1}`;
+    formatted += `[${citationKey}] ${r.title}\n`;
+    formatted += `    URL: ${r.url}\n`;
+    if (r.source) {
+      formatted += `    Source: ${r.source}\n`;
+    }
+    formatted += `    Snippet: ${r.snippet}\n\n`;
+  });
+  formatted += 'Citation requirements for your next answer:\n';
+  formatted += '- If you use a result, cite it inline with its key (example: [web-1]).\n';
+  formatted += '- End with a "Sources" section that lists only cited [web-#] entries and their URLs.\n';
+  formatted += '- Do not invent citations.\n';
+  return formatted;
 }
 
 export function Chat() {
@@ -576,9 +598,15 @@ export function Chat() {
       const artifactPrompt = (settings.artifactsEnabled !== false)
         ? buildArtifactSystemPrompt(allCurrentArtifacts.length > 0 ? allCurrentArtifacts : undefined)
         : undefined;
-      const mergedSystemPrompt = artifactPrompt
+      let mergedSystemPrompt = artifactPrompt
         ? (baseSystemPrompt ? `${baseSystemPrompt}\n\n${artifactPrompt}` : artifactPrompt)
         : baseSystemPrompt;
+      const citationPrompt = buildCitationSystemPrompt(settings.webSearchEnabled, settings.ragEnabled);
+      if (citationPrompt) {
+        mergedSystemPrompt = mergedSystemPrompt
+          ? `${mergedSystemPrompt}\n\n${citationPrompt}`
+          : citationPrompt;
+      }
 
       // Use active path (not all messages) for the API request
       const messagesWithProjectFiles = activePathForStream.map((m, idx) => {
@@ -923,15 +951,7 @@ export function Chat() {
                   if (searchResult) {
                     // Format web search results as tool result text
                     const webResult = searchResult as WebSearchResponse;
-                    if (webResult.results.length === 0) {
-                      formattedResult = `Web search for "${webResult.query}" returned no results.`;
-                    } else {
-                      formattedResult = `Web search results for "${webResult.query}":\n\n`;
-                      webResult.results.forEach((r, i) => {
-                        formattedResult += `[${i + 1}] ${r.title}\n    URL: ${r.url}\n    ${r.snippet}\n\n`;
-                      });
-                      formattedResult += `\nThese are the search results. Please use the information above to answer the user's question. Do not search again unless the user asks a new question.`;
-                    }
+                    formattedResult = formatWebSearchResultsForToolResponse(webResult);
                   } else {
                     formattedResult = 'Web search failed. Please try again.';
                     isError = true;
@@ -1073,10 +1093,7 @@ export function Chat() {
                     const result = await performSearch(tc.params.query as string);
                     if (result && result.results.length > 0) {
                       structuredResult = result;
-                      formattedResult = `Web search results for "${result.query}":\n\n`;
-                      result.results.forEach((r, idx) => {
-                        formattedResult += `[${idx + 1}] ${r.title}\n    URL: ${r.url}\n    ${r.snippet}\n\n`;
-                      });
+                      formattedResult = formatWebSearchResultsForToolResponse(result);
                     } else {
                       formattedResult = `Web search for "${tc.params.query}" returned no results.`;
                     }

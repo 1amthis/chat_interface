@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -9,6 +9,74 @@ import { useTheme } from './ThemeProvider';
 
 interface MarkdownMessageProps {
   content: string;
+  citationSources?: CitationSourceMap;
+}
+
+const CITATION_TOKEN_REGEX = /\[(web|doc)-(\d+)\]/g;
+const CITATION_KEY_REGEX = /^(web|doc)-\d+$/;
+
+export interface CitationWebSource {
+  type: 'web';
+  key: string;
+  title: string;
+  url: string;
+  source?: string;
+  snippet?: string;
+}
+
+export interface CitationDocSource {
+  type: 'doc';
+  key: string;
+  documentName: string;
+  chunk: number;
+  excerpt: string;
+  score?: number;
+}
+
+export type CitationSource = CitationWebSource | CitationDocSource;
+export type CitationSourceMap = Record<string, CitationSource>;
+
+function injectCitationLinks(markdown: string): string {
+  // Preserve fenced and inline code spans to avoid rewriting citation-like text inside code.
+  const segments = markdown.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+  return segments
+    .map((segment) => {
+      if (!segment) return segment;
+      if (segment.startsWith('```') || segment.startsWith('`')) {
+        return segment;
+      }
+      return segment.replace(CITATION_TOKEN_REGEX, (_match, sourceType, index) => {
+        const key = `${sourceType}-${index}`;
+        // Use a hash URL so markdown keeps the href; then render it as a visual badge (non-clickable).
+        return `[${key}](#citation-${key})`;
+      });
+    })
+    .join('');
+}
+
+function extractCitationKeyFromHref(href?: string): string | null {
+  if (!href) return null;
+  if (href.startsWith('#citation-')) {
+    const key = href.slice('#citation-'.length);
+    return CITATION_KEY_REGEX.test(key) ? key : null;
+  }
+  // Backward compatibility with already-generated links
+  if (href.startsWith('citation:')) {
+    const key = href.slice('citation:'.length);
+    return CITATION_KEY_REGEX.test(key) ? key : null;
+  }
+  if (CITATION_KEY_REGEX.test(href)) {
+    return href;
+  }
+  return null;
+}
+
+function citationBadgeClassNames(isWebSource: boolean): string {
+  return `inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.72rem] font-semibold align-middle mx-0.5 border ${
+    isWebSource
+      ? 'bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-700'
+      : 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-700'
+  }`;
 }
 
 const LANGUAGE_DISPLAY: Record<string, string> = {
@@ -104,9 +172,10 @@ const CodeBlock = React.memo(function CodeBlock({
   );
 });
 
-function useMarkdownComponents(): Components {
-  const { resolvedTheme } = useTheme();
-
+function useMarkdownComponents(
+  citationSources?: CitationSourceMap,
+  onOpenDocumentCitation?: (key: string) => void
+): Components {
   return useMemo((): Components => ({
     code({ className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '');
@@ -129,6 +198,54 @@ function useMarkdownComponents(): Components {
       return <>{children}</>;
     },
     a({ href, children, ...props }) {
+      const citationKey = extractCitationKeyFromHref(href);
+      if (citationKey) {
+        const source = citationSources?.[citationKey];
+        const isWebSource = citationKey.startsWith('web-');
+
+        if (source?.type === 'web') {
+          return (
+            <a
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`${citationBadgeClassNames(true)} no-underline hover:brightness-95 transition`}
+              title={`Open source: ${source.title}`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
+              {children}
+            </a>
+          );
+        }
+
+        if (source?.type === 'doc') {
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenDocumentCitation?.(citationKey);
+              }}
+              className={`${citationBadgeClassNames(false)} hover:brightness-95 transition`}
+              title={`Open source excerpt: ${source.documentName} (chunk ${source.chunk})`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
+              {children}
+            </button>
+          );
+        }
+
+        return (
+          <span
+            className={citationBadgeClassNames(isWebSource)}
+            title={isWebSource ? 'Web source citation' : 'Document source citation'}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
+            {children}
+          </span>
+        );
+      }
+
       const isExternal = href && (href.startsWith('http://') || href.startsWith('https://'));
       return (
         <a
@@ -226,19 +343,60 @@ function useMarkdownComponents(): Components {
     hr({ ...props }) {
       return <hr className="border-[var(--border-color)] my-4" {...props} />;
     },
-  }), [resolvedTheme]);
+  }), [citationSources, onOpenDocumentCitation]);
 }
 
 export const MarkdownMessage = React.memo(function MarkdownMessage({
   content,
+  citationSources,
 }: MarkdownMessageProps) {
-  const components = useMarkdownComponents();
+  const [activeDocCitationKey, setActiveDocCitationKey] = useState<string | null>(null);
+
+  const handleOpenDocumentCitation = useCallback((key: string) => {
+    setActiveDocCitationKey((prev) => (prev === key ? null : key));
+  }, []);
+
+  const components = useMarkdownComponents(citationSources, handleOpenDocumentCitation);
+  const contentWithCitationLinks = useMemo(() => injectCitationLinks(content), [content]);
+  const activeDocCitation = useMemo(() => {
+    if (!activeDocCitationKey) return null;
+    const source = citationSources?.[activeDocCitationKey];
+    return source?.type === 'doc' ? source : null;
+  }, [activeDocCitationKey, citationSources]);
 
   return (
     <div className="prose prose-sm dark:prose-invert max-w-none">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {content}
+        {contentWithCitationLinks}
       </ReactMarkdown>
+      {activeDocCitation && (
+        <div className="not-prose mt-3 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/20 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-wide font-semibold text-emerald-700 dark:text-emerald-300">
+                Document Source
+              </p>
+              <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100 truncate">
+                {activeDocCitation.documentName}
+              </p>
+              <p className="text-xs text-emerald-700/80 dark:text-emerald-300/80">
+                Chunk {activeDocCitation.chunk}
+                {typeof activeDocCitation.score === 'number' ? ` · ${Math.round(activeDocCitation.score * 100)}% relevance` : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveDocCitationKey(null)}
+              className="text-xs px-2 py-1 rounded border border-emerald-300 dark:border-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/40"
+            >
+              Close
+            </button>
+          </div>
+          <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap text-emerald-950 dark:text-emerald-50">
+            {activeDocCitation.excerpt}
+          </p>
+        </div>
+      )}
     </div>
   );
 });
