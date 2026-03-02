@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -77,6 +77,27 @@ function citationBadgeClassNames(isWebSource: boolean): string {
       ? 'bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-700'
       : 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-700'
   }`;
+}
+
+function getDomainFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+const DOC_EXCERPT_PREVIEW_CHARS = 420;
+
+function getTruncatedText(text: string, maxChars: number): { text: string; truncated: boolean } {
+  if (text.length <= maxChars) {
+    return { text, truncated: false };
+  }
+
+  const sliced = text.slice(0, maxChars);
+  const lastSpaceIndex = sliced.lastIndexOf(' ');
+  const safeSlice = lastSpaceIndex > maxChars * 0.6 ? sliced.slice(0, lastSpaceIndex) : sliced;
+  return { text: `${safeSlice}...`, truncated: true };
 }
 
 const LANGUAGE_DISPLAY: Record<string, string> = {
@@ -174,7 +195,7 @@ const CodeBlock = React.memo(function CodeBlock({
 
 function useMarkdownComponents(
   citationSources?: CitationSourceMap,
-  onOpenDocumentCitation?: (key: string) => void
+  onOpenCitation?: (key: string) => void
 ): Components {
   return useMemo((): Components => ({
     code({ className, children, ...props }) {
@@ -203,31 +224,19 @@ function useMarkdownComponents(
         const source = citationSources?.[citationKey];
         const isWebSource = citationKey.startsWith('web-');
 
-        if (source?.type === 'web') {
-          return (
-            <a
-              href={source.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`${citationBadgeClassNames(true)} no-underline hover:brightness-95 transition`}
-              title={`Open source: ${source.title}`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
-              {children}
-            </a>
-          );
-        }
-
-        if (source?.type === 'doc') {
+        if (source) {
+          const tooltip = source.type === 'web'
+            ? `${source.title} — ${getDomainFromUrl(source.url)}`
+            : `${source.documentName} (chunk ${source.chunk})`;
           return (
             <button
               type="button"
               onClick={(e) => {
                 e.preventDefault();
-                onOpenDocumentCitation?.(citationKey);
+                onOpenCitation?.(citationKey);
               }}
-              className={`${citationBadgeClassNames(false)} hover:brightness-95 transition`}
-              title={`Open source excerpt: ${source.documentName} (chunk ${source.chunk})`}
+              className={`${citationBadgeClassNames(isWebSource)} hover:brightness-95 transition`}
+              title={tooltip}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
               {children}
@@ -343,58 +352,134 @@ function useMarkdownComponents(
     hr({ ...props }) {
       return <hr className="border-[var(--border-color)] my-4" {...props} />;
     },
-  }), [citationSources, onOpenDocumentCitation]);
+  }), [citationSources, onOpenCitation]);
 }
 
 export const MarkdownMessage = React.memo(function MarkdownMessage({
   content,
   citationSources,
 }: MarkdownMessageProps) {
-  const [activeDocCitationKey, setActiveDocCitationKey] = useState<string | null>(null);
+  const [activeCitationKey, setActiveCitationKey] = useState<string | null>(null);
+  const [showFullDocExcerpt, setShowFullDocExcerpt] = useState(false);
 
-  const handleOpenDocumentCitation = useCallback((key: string) => {
-    setActiveDocCitationKey((prev) => (prev === key ? null : key));
+  const handleOpenCitation = useCallback((key: string) => {
+    setShowFullDocExcerpt(false);
+    setActiveCitationKey((prev) => (prev === key ? null : key));
   }, []);
 
-  const components = useMarkdownComponents(citationSources, handleOpenDocumentCitation);
+  const components = useMarkdownComponents(citationSources, handleOpenCitation);
   const contentWithCitationLinks = useMemo(() => injectCitationLinks(content), [content]);
-  const activeDocCitation = useMemo(() => {
-    if (!activeDocCitationKey) return null;
-    const source = citationSources?.[activeDocCitationKey];
-    return source?.type === 'doc' ? source : null;
-  }, [activeDocCitationKey, citationSources]);
+  const activeCitation = useMemo(() => {
+    if (!activeCitationKey) return null;
+    return citationSources?.[activeCitationKey] || null;
+  }, [activeCitationKey, citationSources]);
+
+  useEffect(() => {
+    if (!activeCitation) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActiveCitationKey(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeCitation]);
 
   return (
     <div className="prose prose-sm dark:prose-invert max-w-none">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {contentWithCitationLinks}
       </ReactMarkdown>
-      {activeDocCitation && (
-        <div className="not-prose mt-3 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/20 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-wide font-semibold text-emerald-700 dark:text-emerald-300">
-                Document Source
-              </p>
-              <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100 truncate">
-                {activeDocCitation.documentName}
-              </p>
-              <p className="text-xs text-emerald-700/80 dark:text-emerald-300/80">
-                Chunk {activeDocCitation.chunk}
-                {typeof activeDocCitation.score === 'number' ? ` · ${Math.round(activeDocCitation.score * 100)}% relevance` : ''}
-              </p>
+      {activeCitation && (
+        <div className="not-prose fixed inset-0 z-[70] flex items-center justify-center p-4 sm:p-6">
+          <button
+            type="button"
+            aria-label="Close source dialog"
+            className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
+            onClick={() => setActiveCitationKey(null)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            className={`relative w-full max-w-2xl max-h-[85vh] rounded-xl border shadow-2xl p-4 sm:p-5 flex flex-col overflow-hidden ${
+              activeCitation.type === 'web'
+                ? 'border-blue-200 dark:border-blue-700 bg-white dark:bg-gray-900'
+                : 'border-emerald-200 dark:border-emerald-700 bg-white dark:bg-gray-900'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p
+                  className={`text-[11px] uppercase tracking-wide font-semibold ${
+                    activeCitation.type === 'web'
+                      ? 'text-blue-700 dark:text-blue-300'
+                      : 'text-emerald-700 dark:text-emerald-300'
+                  }`}
+                >
+                  {activeCitation.type === 'web' ? 'Web Source' : 'Document Source'}
+                </p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 break-words">
+                  {activeCitation.type === 'web' ? activeCitation.title : activeCitation.documentName}
+                </p>
+                {activeCitation.type === 'web' ? (
+                  <p className="text-xs text-gray-600 dark:text-gray-400 break-all">
+                    {getDomainFromUrl(activeCitation.url)}
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    Chunk {activeCitation.chunk}
+                    {typeof activeCitation.score === 'number' ? ` · ${Math.round(activeCitation.score * 100)}% relevance` : ''}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {activeCitation.type === 'web' && (
+                  <a
+                    href={activeCitation.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs px-2.5 py-1.5 rounded border border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                  >
+                    Open
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setActiveCitationKey(null)}
+                  className="text-xs px-2.5 py-1.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setActiveDocCitationKey(null)}
-              className="text-xs px-2 py-1 rounded border border-emerald-300 dark:border-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/40"
-            >
-              Close
-            </button>
+
+            <div className="mt-3 min-h-0 overflow-y-auto pr-1">
+              {activeCitation.type === 'web' ? (
+                activeCitation.snippet && (
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200">
+                    {activeCitation.snippet}
+                  </p>
+                )
+              ) : (
+                <>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200">
+                    {showFullDocExcerpt
+                      ? activeCitation.excerpt
+                      : getTruncatedText(activeCitation.excerpt, DOC_EXCERPT_PREVIEW_CHARS).text}
+                  </p>
+                  {getTruncatedText(activeCitation.excerpt, DOC_EXCERPT_PREVIEW_CHARS).truncated && (
+                    <button
+                      type="button"
+                      onClick={() => setShowFullDocExcerpt((prev) => !prev)}
+                      className="mt-2 text-xs px-2.5 py-1.5 rounded border border-emerald-300 dark:border-emerald-600 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+                    >
+                      {showFullDocExcerpt ? 'Voir moins' : 'Voir plus'}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
-          <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap text-emerald-950 dark:text-emerald-50">
-            {activeDocCitation.excerpt}
-          </p>
         </div>
       )}
     </div>
