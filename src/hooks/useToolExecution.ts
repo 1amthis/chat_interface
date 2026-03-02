@@ -40,7 +40,8 @@ export interface UseToolExecutionReturn {
     excludeConversationId?: string
   ) => Promise<{ results: MemorySearchResult[]; formatted: string } | null>;
   performRAGSearch: (
-    query: string
+    query: string,
+    citationBatch?: number
   ) => Promise<{ results: RAGSearchResult[]; formatted: string } | null>;
   performMCPToolCall: (
     toolName: string,
@@ -380,7 +381,8 @@ export function useToolExecution({
 
   // Perform RAG search across uploaded documents
   const performRAGSearch = useCallback(async (
-    query: string
+    query: string,
+    citationBatch?: number
   ): Promise<{ results: RAGSearchResult[]; formatted: string } | null> => {
     try {
       if (!settings.openaiKey) {
@@ -401,7 +403,7 @@ export function useToolExecution({
 
       return {
         results,
-        formatted: formatRAGResultsForAI(results),
+        formatted: formatRAGResultsForAI(results, citationBatch),
       };
     } catch (error) {
       console.error('RAG search error:', error);

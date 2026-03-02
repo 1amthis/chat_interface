@@ -99,14 +99,24 @@ function isThinkingEnabled(settings: ChatSettings, provider: Provider, model: st
   return false;
 }
 
-function formatWebSearchResultsForToolResponse(result: WebSearchResponse): string {
+function countToolExecutions(
+  toolExecutions: ToolExecutionResult[] | undefined,
+  toolName: string
+): number {
+  if (!toolExecutions || toolExecutions.length === 0) return 0;
+  return toolExecutions.filter((execution) => execution.toolName === toolName).length;
+}
+
+function formatWebSearchResultsForToolResponse(result: WebSearchResponse, citationBatch?: number): string {
   if (result.results.length === 0) {
     return `Web search for "${result.query}" returned no results.`;
   }
 
   let formatted = `Web search results for "${result.query}":\n\n`;
   result.results.forEach((r, i) => {
-    const citationKey = `web-${i + 1}`;
+    const citationKey = citationBatch
+      ? `web-${citationBatch}-${i + 1}`
+      : `web-${i + 1}`;
     formatted += `[${citationKey}] ${r.title}\n`;
     formatted += `    URL: ${r.url}\n`;
     if (r.source) {
@@ -115,8 +125,8 @@ function formatWebSearchResultsForToolResponse(result: WebSearchResponse): strin
     formatted += `    Snippet: ${r.snippet}\n\n`;
   });
   formatted += 'Citation requirements for your next answer:\n';
-  formatted += '- If you use a result, cite it inline with its key (example: [web-1]).\n';
-  formatted += '- End with a "Sources" section that lists only cited [web-#] entries and their URLs.\n';
+  formatted += `- If you use a result, cite it inline with its key (example: ${citationBatch ? '[web-1-1]' : '[web-1]'}).\n`;
+  formatted += '- End with a "Sources" section that lists only cited [web-#] (or [web-#-#]) entries and their URLs.\n';
   formatted += '- Do not invent citations.\n';
   return formatted;
 }
@@ -941,17 +951,24 @@ export function Chat() {
               } else if (toolName === 'web_search' || toolName === 'google_drive_search' || toolName === 'memory_search' || toolName === 'rag_search') {
                 // Web search, Google Drive search, or Memory search - handle as proper tool results
                 const searchQuery = toolParams.query as string;
+                const priorWebSearchCount = countToolExecutions(toolExecutions, 'web_search');
+                const priorRagSearchCount = countToolExecutions(toolExecutions, 'rag_search');
 
                 let searchResult: WebSearchResponse | GoogleDriveSearchResponse | Record<string, unknown> | null = null;
                 let formattedResult = '';
                 let isError = false;
 
                 if (toolName === 'web_search') {
+                  const citationBatch = priorWebSearchCount + 1;
                   searchResult = await performSearch(searchQuery);
                   if (searchResult) {
                     // Format web search results as tool result text
                     const webResult = searchResult as WebSearchResponse;
-                    formattedResult = formatWebSearchResultsForToolResponse(webResult);
+                    formattedResult = formatWebSearchResultsForToolResponse(webResult, citationBatch);
+                    searchResult = {
+                      ...webResult,
+                      citationBatch,
+                    };
                   } else {
                     formattedResult = 'Web search failed. Please try again.';
                     isError = true;
@@ -986,10 +1003,16 @@ export function Chat() {
                     isError = true;
                   }
                 } else if (toolName === 'rag_search') {
-                  const ragResult = await performRAGSearch(searchQuery);
+                  const citationBatch = priorRagSearchCount + 1;
+                  const ragResult = await performRAGSearch(searchQuery, citationBatch);
                   if (ragResult) {
                     formattedResult = ragResult.formatted;
-                    searchResult = { __rag_search__: true, query: searchQuery, results: ragResult.results };
+                    searchResult = {
+                      __rag_search__: true,
+                      citationBatch,
+                      query: searchQuery,
+                      results: ragResult.results,
+                    };
                   } else {
                     formattedResult = 'Document search failed. Please try again.';
                     isError = true;
@@ -1071,6 +1094,26 @@ export function Chat() {
               setStreamingContentBlocks([...contentBlocksAccumulator]);
 
               // Process all tool calls in parallel
+              const priorWebSearchCount = countToolExecutions(toolExecutions, 'web_search');
+              const priorRagSearchCount = countToolExecutions(toolExecutions, 'rag_search');
+              let nextWebSearchBatch = priorWebSearchCount;
+              let nextRagSearchBatch = priorRagSearchCount;
+              const citationBatchByToolCallId = new Map<string, number>();
+              parsed.tool_calls.forEach((
+                tc: { name: string },
+                idx: number
+              ) => {
+                const currentToolCallId = newToolCalls[idx]?.id;
+                if (!currentToolCallId) return;
+                if (tc.name === 'web_search') {
+                  nextWebSearchBatch += 1;
+                  citationBatchByToolCallId.set(currentToolCallId, nextWebSearchBatch);
+                } else if (tc.name === 'rag_search') {
+                  nextRagSearchBatch += 1;
+                  citationBatchByToolCallId.set(currentToolCallId, nextRagSearchBatch);
+                }
+              });
+
               const toolCallPromises = parsed.tool_calls.map(async (
                 tc: {
                   id: string;
@@ -1090,10 +1133,14 @@ export function Chat() {
                 let structuredResult: unknown = null;
                 try {
                   if (tc.name === 'web_search') {
+                    const citationBatch = citationBatchByToolCallId.get(toolCall.id);
                     const result = await performSearch(tc.params.query as string);
                     if (result && result.results.length > 0) {
-                      structuredResult = result;
-                      formattedResult = formatWebSearchResultsForToolResponse(result);
+                      structuredResult = {
+                        ...result,
+                        citationBatch,
+                      };
+                      formattedResult = formatWebSearchResultsForToolResponse(result, citationBatch);
                     } else {
                       formattedResult = `Web search for "${tc.params.query}" returned no results.`;
                     }
@@ -1121,10 +1168,16 @@ export function Chat() {
                       isError = true;
                     }
                   } else if (tc.name === 'rag_search') {
-                    const result = await performRAGSearch(tc.params.query as string);
+                    const citationBatch = citationBatchByToolCallId.get(toolCall.id);
+                    const result = await performRAGSearch(tc.params.query as string, citationBatch);
                     if (result) {
                       formattedResult = result.formatted;
-                      structuredResult = { __rag_search__: true, query: tc.params.query, results: result.results };
+                      structuredResult = {
+                        __rag_search__: true,
+                        citationBatch,
+                        query: tc.params.query,
+                        results: result.results,
+                      };
                     } else {
                       formattedResult = 'Document search failed.';
                       isError = true;

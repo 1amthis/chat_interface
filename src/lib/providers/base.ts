@@ -89,8 +89,9 @@ export function buildCitationSystemPrompt(
 
 When you use facts from tool results, cite sources inline immediately after the claim.
 
-- For web_search results, cite using the provided keys like \`[web-1]\`.
-- For rag_search (uploaded documents), cite using the provided keys like \`[doc-1]\`.
+- For web_search results, cite using the provided keys like \`[web-1-1]\`.
+- For rag_search (uploaded documents), cite using the provided keys like \`[doc-1-1]\`.
+- Keys may include multiple numeric segments (for example \`[web-2-3]\`) when multiple searches occur in one answer.
 - Never invent citation keys. Only cite keys that were provided in tool results.
 - End answers that use external sources with a **Sources** section listing only cited keys.
 - If no source supports a claim, say that clearly instead of citing.`;

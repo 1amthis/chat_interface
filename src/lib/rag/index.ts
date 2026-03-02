@@ -196,7 +196,7 @@ export async function getDocumentChunks(documentId: string): Promise<RAGChunk[]>
 /**
  * Format RAG search results for display to the AI
  */
-export function formatRAGResultsForAI(results: RAGSearchResult[]): string {
+export function formatRAGResultsForAI(results: RAGSearchResult[], citationBatch?: number): string {
   if (results.length === 0) {
     return 'No relevant content found in uploaded documents.';
   }
@@ -205,15 +205,17 @@ export function formatRAGResultsForAI(results: RAGSearchResult[]): string {
 
   results.forEach((result, index) => {
     const relevance = Math.round(result.score * 100);
-    const citationKey = `doc-${index + 1}`;
+    const citationKey = citationBatch
+      ? `doc-${citationBatch}-${index + 1}`
+      : `doc-${index + 1}`;
     output += `[${citationKey}] From "${result.documentName}" (chunk ${result.position + 1}):\n`;
     output += `Excerpt: ${result.chunkContent}\n`;
     output += `Relevance: ${relevance}%\n\n`;
   });
 
   output += `Citation requirements for your next answer:\n`;
-  output += `- If you use a passage, cite it inline with its key (example: [doc-1]).\n`;
-  output += `- End with a "Sources" section that lists only cited [doc-#] entries and their document + chunk.\n`;
+  output += `- If you use a passage, cite it inline with its key (example: ${citationBatch ? '[doc-1-1]' : '[doc-1]'}).\n`;
+  output += `- End with a "Sources" section that lists only cited [doc-#] (or [doc-#-#]) entries and their document + chunk.\n`;
   output += `- Do not invent citations.\n`;
 
   return output.trim();

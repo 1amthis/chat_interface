@@ -10,6 +10,7 @@ import { formatFileSize } from '@/lib/utils';
 
 interface RAGSearchResponseData {
   __rag_search__: true;
+  citationBatch?: number;
   query: string;
   results: Array<{
     documentName: string;
@@ -19,11 +20,15 @@ interface RAGSearchResponseData {
   }>;
 }
 
-function tryParseWebSearchResponse(result: unknown): WebSearchResponse | null {
+interface WebSearchResponseWithCitationBatch extends WebSearchResponse {
+  citationBatch?: number;
+}
+
+function tryParseWebSearchResponse(result: unknown): WebSearchResponseWithCitationBatch | null {
   if (result && typeof result === 'object') {
     const obj = result as Record<string, unknown>;
     if (typeof obj.query === 'string' && Array.isArray(obj.results) && typeof obj.timestamp === 'number') {
-      return obj as unknown as WebSearchResponse;
+      return obj as unknown as WebSearchResponseWithCitationBatch;
     }
   }
   if (typeof result === 'string') {
@@ -69,8 +74,11 @@ function buildCitationSources(toolCalls?: ToolCall[]): CitationSourceMap {
     if (toolCall.name === 'web_search') {
       const parsed = tryParseWebSearchResponse(toolCall.result);
       if (!parsed) return;
+      const batch = parsed.citationBatch;
       parsed.results.forEach((result, index) => {
-        const key = `web-${index + 1}`;
+        const key = batch
+          ? `web-${batch}-${index + 1}`
+          : `web-${index + 1}`;
         sources[key] = {
           type: 'web',
           key,
@@ -85,8 +93,11 @@ function buildCitationSources(toolCalls?: ToolCall[]): CitationSourceMap {
     if (toolCall.name === 'rag_search') {
       const parsed = tryParseRAGSearchResponse(toolCall.result);
       if (!parsed) return;
+      const batch = parsed.citationBatch;
       parsed.results.forEach((result, index) => {
-        const key = `doc-${index + 1}`;
+        const key = batch
+          ? `doc-${batch}-${index + 1}`
+          : `doc-${index + 1}`;
         sources[key] = {
           type: 'doc',
           key,

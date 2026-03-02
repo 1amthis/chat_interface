@@ -12,8 +12,8 @@ interface MarkdownMessageProps {
   citationSources?: CitationSourceMap;
 }
 
-const CITATION_TOKEN_REGEX = /\[(web|doc)-(\d+)\]/g;
-const CITATION_KEY_REGEX = /^(web|doc)-\d+$/;
+const CITATION_TOKEN_REGEX = /\[((?:web|doc)-\d+(?:-\d+)*)\]/g;
+const CITATION_KEY_REGEX = /^(web|doc)-\d+(?:-\d+)*$/;
 
 export interface CitationWebSource {
   type: 'web';
@@ -45,8 +45,7 @@ function injectCitationLinks(markdown: string): string {
       if (segment.startsWith('```') || segment.startsWith('`')) {
         return segment;
       }
-      return segment.replace(CITATION_TOKEN_REGEX, (_match, sourceType, index) => {
-        const key = `${sourceType}-${index}`;
+      return segment.replace(CITATION_TOKEN_REGEX, (_match, key) => {
         // Use a hash URL so markdown keeps the href; then render it as a visual badge (non-clickable).
         return `[${key}](#citation-${key})`;
       });
