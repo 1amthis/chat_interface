@@ -29,6 +29,11 @@ export function MessageUsageDisplay({ usage, model, contextBreakdown, onOpenCont
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
         </svg>
         <span>{formatNumber(totalTokens)} tokens</span>
+        {usage.reasoningTokens !== undefined && (
+          <span className="text-orange-500 dark:text-orange-400">
+            +{formatNumber(usage.reasoningTokens)} reasoning
+          </span>
+        )}
         {cost !== null && (
           <span className="text-amber-500 dark:text-amber-400">
             ${cost < 0.01 ? '<0.01' : cost.toFixed(3)}
@@ -61,7 +66,7 @@ export function MessageUsageDisplay({ usage, model, contextBreakdown, onOpenCont
               <span>Cached: <span className="text-purple-600 dark:text-purple-400 font-medium">{formatNumber(usage.cachedTokens)}</span></span>
             </div>
           )}
-          {usage.reasoningTokens !== undefined && usage.reasoningTokens > 0 && (
+          {usage.reasoningTokens !== undefined && (
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-orange-500 inline-block" />
               <span>Reasoning: <span className="text-orange-600 dark:text-orange-400 font-medium">{formatNumber(usage.reasoningTokens)}</span></span>

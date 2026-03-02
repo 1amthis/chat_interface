@@ -770,11 +770,15 @@ export function Chat() {
               capturedUsage = usage;
               setLastUsage(usage);
               setSessionUsage((prev) => ({
+                ...(prev.reasoningTokens !== undefined || usage.reasoningTokens !== undefined
+                  ? { reasoningTokens: (prev.reasoningTokens ?? 0) + (usage.reasoningTokens ?? 0) }
+                  : {}),
+                ...(prev.cachedTokens !== undefined || usage.cachedTokens !== undefined
+                  ? { cachedTokens: (prev.cachedTokens ?? 0) + (usage.cachedTokens ?? 0) }
+                  : {}),
                 inputTokens: prev.inputTokens + usage.inputTokens,
                 outputTokens: prev.outputTokens + usage.outputTokens,
                 totalTokens: prev.totalTokens + usage.totalTokens,
-                cachedTokens: (prev.cachedTokens || 0) + (usage.cachedTokens || 0) || undefined,
-                reasoningTokens: (prev.reasoningTokens || 0) + (usage.reasoningTokens || 0) || undefined,
               }));
               // Record usage for cost tracking
               addUsageRecord({

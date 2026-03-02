@@ -3,7 +3,7 @@ import { streamChat, ChatMessage, ToolExecutionResult } from '@/lib/providers';
 import { ChatSettings, WebSearchResponse, GoogleDriveSearchResponse, UnifiedTool, ContextBreakdown, ContextBreakdownSection } from '@/types';
 import { mcpManager } from '@/lib/mcp/manager';
 import { getBuiltinTools } from '@/lib/mcp/builtin-tools';
-import { estimateTokens } from '@/lib/token-estimation';
+import { estimateTokens, countInputTokensWithProviderAPI } from '@/lib/token-estimation';
 import { getModelMetadata } from '@/lib/model-metadata';
 
 export const dynamic = 'force-dynamic';
@@ -60,6 +60,60 @@ function extractErrorMessage(error: unknown): string {
   return parts.join(' ') || error.message || 'Unknown error';
 }
 
+function allocateProportional(values: number[], targetTotal: number): number[] {
+  const safeTarget = Math.max(0, Math.floor(targetTotal));
+  if (safeTarget === 0) {
+    return values.map(() => 0);
+  }
+
+  const normalized = values.map((v) => Math.max(0, v));
+  const sum = normalized.reduce((acc, v) => acc + v, 0);
+  if (sum <= 0) {
+    const uniform = Math.floor(safeTarget / normalized.length);
+    const remainder = safeTarget - uniform * normalized.length;
+    return normalized.map((_, idx) => uniform + (idx < remainder ? 1 : 0));
+  }
+
+  const rawShares = normalized.map((v) => (v / sum) * safeTarget);
+  const allocated = rawShares.map((share) => Math.floor(share));
+  const remainder = safeTarget - allocated.reduce((acc, v) => acc + v, 0);
+
+  if (remainder > 0) {
+    const fractions = rawShares
+      .map((share, idx) => ({ idx, frac: share - allocated[idx] }))
+      .sort((a, b) => b.frac - a.frac);
+
+    for (let i = 0; i < remainder; i++) {
+      const target = fractions[i % fractions.length];
+      allocated[target.idx] += 1;
+    }
+  }
+
+  return allocated;
+}
+
+function rescaleSectionsToTotal(sections: ContextBreakdownSection[], targetTotal: number): void {
+  if (sections.length === 0) return;
+
+  const sectionValues = sections.map((section) => section.estimatedTokens);
+  const scaledSectionValues = allocateProportional(sectionValues, targetTotal);
+
+  for (let i = 0; i < sections.length; i++) {
+    const originalSectionTokens = Math.max(0, sections[i].estimatedTokens);
+    const newSectionTokens = scaledSectionValues[i] ?? 0;
+    sections[i].estimatedTokens = newSectionTokens;
+
+    if (sections[i].details && sections[i].details!.length > 0 && originalSectionTokens > 0) {
+      const detailValues = sections[i].details!.map((detail) => detail.estimatedTokens);
+      const scaledDetails = allocateProportional(detailValues, newSectionTokens);
+      sections[i].details = sections[i].details!.map((detail, idx) => ({
+        ...detail,
+        estimatedTokens: scaledDetails[idx] ?? 0,
+      }));
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -90,7 +144,7 @@ export async function POST(request: NextRequest) {
     };
 
     // Collect MCP and built-in tools if enabled
-    let mcpTools: UnifiedTool[] = [];
+    const mcpTools: UnifiedTool[] = [];
 
     if (settings.mcpEnabled) {
       // Update MCP configuration if servers are configured
@@ -210,7 +264,45 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const totalEstimatedTokens = systemTokens + toolTokens + totalMessageTokens + toolResultTokens;
+    const heuristicTotalTokens = systemTokens + toolTokens + totalMessageTokens + toolResultTokens;
+
+    // Try provider-native token counting for an authoritative total, then
+    // redistribute section estimates proportionally to match it.
+    let totalEstimatedTokens = heuristicTotalTokens;
+    let countingMethod: ContextBreakdown['countingMethod'] = 'heuristic';
+    let countingSource = 'local.heuristic';
+
+    const providerCount = await countInputTokensWithProviderAPI({
+      messages,
+      settings,
+      systemPrompt,
+      webSearchEnabled,
+      searchResults,
+      googleDriveEnabled,
+      driveSearchResults,
+      memorySearchEnabled,
+      mcpTools,
+      toolExecutions,
+      ragEnabled,
+      artifactsEnabled,
+    });
+
+    if (providerCount && providerCount.totalTokens > 0) {
+      totalEstimatedTokens = providerCount.totalTokens;
+      countingMethod = 'provider_api';
+      countingSource = providerCount.source;
+
+      if (sections.length > 0) {
+        rescaleSectionsToTotal(sections, totalEstimatedTokens);
+      } else {
+        sections.push({
+          label: 'Conversation Context',
+          estimatedTokens: totalEstimatedTokens,
+          percentage: 0,
+          color: '#22c55e',
+        });
+      }
+    }
 
     // Compute percentages
     for (const section of sections) {
@@ -223,6 +315,9 @@ export async function POST(request: NextRequest) {
       contextWindowSize,
       percentUsed: contextWindowSize > 0 ? (totalEstimatedTokens / contextWindowSize) * 100 : 0,
       model: settings.model,
+      countingMethod,
+      countingProvider: settings.provider,
+      countingSource,
     };
 
     const encoder = new TextEncoder();

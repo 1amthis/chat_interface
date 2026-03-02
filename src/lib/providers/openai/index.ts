@@ -564,7 +564,9 @@ export async function* streamOpenAIResponses(
 
   let inputTokens = 0;
   let outputTokens = 0;
-  let reasoningTokens = 0;
+  let totalTokens = 0;
+  let cachedTokens: number | undefined;
+  let reasoningTokens: number | undefined;
   let sawReasoningSummaryDelta = false;
   let sawReasoningTextDelta = false;
 
@@ -689,12 +691,49 @@ export async function* streamOpenAIResponses(
     // Handle completion with usage info
     if (eventType === 'response.completed') {
       const response = event.response as Record<string, unknown>;
-      const usage = response?.usage as Record<string, number> | undefined;
+      const usage = response?.usage as Record<string, unknown> | undefined;
+      if (process.env.DEBUG_OPENAI_USAGE === '1') {
+        console.log('[OpenAI Responses usage]', JSON.stringify({
+          model,
+          responseId: response?.id,
+          usage,
+        }));
+      }
 
       if (usage) {
-        inputTokens = usage.input_tokens || 0;
-        outputTokens = usage.output_tokens || 0;
-        reasoningTokens = usage.reasoning_tokens || 0;
+        const usageInputTokens = usage.input_tokens ?? usage.inputTokens;
+        const usageOutputTokens = usage.output_tokens ?? usage.outputTokens;
+        const usageTotalTokens = usage.total_tokens ?? usage.totalTokens;
+
+        if (typeof usageInputTokens === 'number') {
+          inputTokens = usageInputTokens;
+        }
+        if (typeof usageOutputTokens === 'number') {
+          outputTokens = usageOutputTokens;
+        }
+        if (typeof usageTotalTokens === 'number') {
+          totalTokens = usageTotalTokens;
+        }
+
+        const inputDetails =
+          (usage.input_tokens_details as Record<string, unknown> | undefined) ??
+          (usage.inputTokensDetails as Record<string, unknown> | undefined);
+        const outputDetails =
+          (usage.output_tokens_details as Record<string, unknown> | undefined) ??
+          (usage.outputTokensDetails as Record<string, unknown> | undefined);
+        const cached = inputDetails?.cached_tokens ?? inputDetails?.cachedTokens;
+        const reasoning =
+          outputDetails?.reasoning_tokens ??
+          outputDetails?.reasoningTokens ??
+          usage.reasoning_tokens ??
+          usage.reasoningTokens;
+
+        if (typeof cached === 'number') {
+          cachedTokens = cached;
+        }
+        if (typeof reasoning === 'number') {
+          reasoningTokens = reasoning;
+        }
       }
     }
   }
@@ -705,8 +744,9 @@ export async function* streamOpenAIResponses(
     usage: {
       inputTokens,
       outputTokens,
-      totalTokens: inputTokens + outputTokens,
-      reasoningTokens: reasoningTokens > 0 ? reasoningTokens : undefined,
+      totalTokens: totalTokens || inputTokens + outputTokens,
+      cachedTokens,
+      reasoningTokens,
     },
   };
 }

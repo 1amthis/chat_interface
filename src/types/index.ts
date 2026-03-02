@@ -317,6 +317,9 @@ export interface ContextBreakdown {
   contextWindowSize: number;
   percentUsed: number;
   model: string;
+  countingMethod?: 'provider_api' | 'heuristic';
+  countingProvider?: Provider;
+  countingSource?: string;
 }
 
 export interface ApiKeyValidationStatus {
@@ -730,4 +733,120 @@ export interface RichSlide {
 export interface RichPresentation {
   theme?: PresentationTheme;
   slides: RichSlide[];
+}
+
+// ===== Rich Document Types =====
+
+/** Document theme — colors as 6-char hex WITHOUT # prefix */
+export interface DocumentTheme {
+  primaryColor?: string;      // Heading color (default: "1A1A2E")
+  bodyColor?: string;         // Body text color (default: "333333")
+  accentColor?: string;       // Accent elements — borders, highlights (default: "3B82F6")
+  backgroundColor?: string;   // Page background (default: "FFFFFF")
+  headingFont?: string;       // e.g. "Georgia", "Arial"
+  bodyFont?: string;          // e.g. "Calibri", "Times New Roman"
+  fontSize?: number;          // Base body font size in pt (default: 11)
+  lineSpacing?: number;       // Line spacing multiplier (default: 1.15)
+}
+
+/** A single text run with optional formatting */
+export interface DocTextRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  color?: string;            // Hex without #
+  fontSize?: number;         // In pt
+  fontFace?: string;
+  hyperlink?: string;        // URL
+  code?: boolean;            // Inline code formatting
+  superscript?: boolean;
+  subscript?: boolean;
+}
+
+/** Rich text — plain string or formatted runs */
+export type DocRichText = string | DocTextRun[];
+
+/** List item that may contain nested sub-items */
+export interface DocListItem {
+  text: DocRichText;
+  children?: DocListItem[];
+}
+
+/** Table cell with optional formatting */
+export interface DocTableCell {
+  text: string;
+  bold?: boolean;
+  fill?: string;             // Background color hex
+  color?: string;            // Text color hex
+  align?: 'left' | 'center' | 'right';
+  colspan?: number;
+  rowspan?: number;
+}
+
+/** Table definition */
+export interface DocTable {
+  headers?: (string | DocTableCell)[];
+  rows: (string | DocTableCell)[][];
+  headerFill?: string;
+  headerColor?: string;
+  borderColor?: string;
+  caption?: string;
+}
+
+/** Image block */
+export interface DocImage {
+  data?: string;             // Base64 data URI
+  path?: string;             // URL
+  width?: number;            // In inches
+  height?: number;           // In inches
+  alt?: string;
+  caption?: string;
+  align?: 'left' | 'center' | 'right';
+}
+
+/** Code block */
+export interface DocCodeBlock {
+  code: string;
+  language?: string;
+  caption?: string;
+}
+
+/** Blockquote callout */
+export interface DocCallout {
+  text: DocRichText;
+  type?: 'note' | 'info' | 'warning' | 'tip';
+}
+
+/** A single block in the document */
+export type DocumentBlock =
+  | { type: 'heading'; text: DocRichText; level: 1 | 2 | 3 | 4 | 5 | 6 }
+  | { type: 'paragraph'; text: DocRichText }
+  | { type: 'list'; items: (string | DocListItem)[]; ordered: boolean }
+  | { type: 'table'; table: DocTable }
+  | { type: 'code'; code: DocCodeBlock }
+  | { type: 'image'; image: DocImage }
+  | { type: 'blockquote'; text: DocRichText }
+  | { type: 'callout'; callout: DocCallout }
+  | { type: 'break'; break: { type: 'horizontal-rule' | 'page-break' } };
+
+/** A document section (optional grouping) */
+export interface DocumentSection {
+  heading?: string;
+  blocks: DocumentBlock[];
+}
+
+/** Top-level rich document JSON */
+export interface RichDocument {
+  theme?: DocumentTheme;
+  title?: string;
+  subtitle?: string;
+  blocks?: DocumentBlock[];
+  sections?: DocumentSection[];
+  author?: string;
+  date?: string;
+  header?: string;           // Running header text
+  footer?: string;           // Running footer text
+  showPageNumbers?: boolean;
 }

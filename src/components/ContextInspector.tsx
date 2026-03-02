@@ -12,6 +12,7 @@ interface ContextInspectorProps {
 
 export function ContextInspector({ breakdown, onClose }: ContextInspectorProps) {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
+  const hasProviderCount = breakdown.countingMethod === 'provider_api';
 
   const remainingTokens = breakdown.contextWindowSize - breakdown.totalEstimatedTokens;
   const remainingPercent = Math.max(0, (remainingTokens / breakdown.contextWindowSize) * 100);
@@ -45,7 +46,7 @@ export function ContextInspector({ breakdown, onClose }: ContextInspectorProps) 
           {/* Usage summary */}
           <div className="flex items-baseline justify-between">
             <span className="text-sm text-gray-600 dark:text-gray-400">
-              ~{formatNumber(breakdown.totalEstimatedTokens)} of {formatContextWindow(breakdown.contextWindowSize)} tokens used
+              {hasProviderCount ? formatNumber(breakdown.totalEstimatedTokens) : `~${formatNumber(breakdown.totalEstimatedTokens)}`} of {formatContextWindow(breakdown.contextWindowSize)} tokens used
             </span>
             <span className="text-sm font-medium">
               {breakdown.percentUsed.toFixed(1)}%
@@ -141,7 +142,9 @@ export function ContextInspector({ breakdown, onClose }: ContextInspectorProps) 
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-[var(--border-color)] text-xs text-gray-400 dark:text-gray-500">
-          Token counts are estimates (~4 chars/token). Actual usage is reported by the provider.
+          {hasProviderCount
+            ? `Total context count from ${breakdown.countingProvider || 'provider'} API (${breakdown.countingSource || 'native count'}). Section splits remain proportional estimates.`
+            : 'Token counts are local estimates (~4 chars/token). Actual usage is reported by the provider after generation.'}
         </div>
       </div>
     </div>
