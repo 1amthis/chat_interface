@@ -32,6 +32,7 @@ import type { ChatSettings, GoogleDriveSearchResponse, Provider, UnifiedTool, We
 
 const MISTRAL_BASE_URL = 'https://api.mistral.ai/v1';
 const CEREBRAS_BASE_URL = 'https://api.cerebras.ai/v1';
+const ANTHROPIC_EPHEMERAL_CACHE_CONTROL: Anthropic.CacheControlEphemeral = { type: 'ephemeral' };
 
 const providerCountEndpointSupport: Partial<Record<'mistral' | 'cerebras', boolean>> = {};
 
@@ -243,7 +244,12 @@ async function countOpenAITokens(params: ProviderTokenCountParams): Promise<numb
 }
 
 function buildAnthropicMessages(messages: ChatMessage[]): Anthropic.MessageParam[] {
-  return messages.map((msg) => {
+  const lastUserMessageIndex = messages.reduce(
+    (lastIndex, msg, index) => (msg.role === 'user' ? index : lastIndex),
+    -1
+  );
+
+  return messages.map((msg, index) => {
     if (msg.role === 'assistant') {
       if (msg.contentBlocks && msg.contentBlocks.length > 0) {
         const contentBlocks: Anthropic.ContentBlockParam[] = [];
@@ -265,7 +271,10 @@ function buildAnthropicMessages(messages: ChatMessage[]): Anthropic.MessageParam
       return { role: 'assistant', content: msg.content || '...' };
     }
 
-    return { role: 'user', content: toAnthropicContent(msg) };
+    return {
+      role: 'user',
+      content: toAnthropicContent(msg, { cacheBreakpoint: index === lastUserMessageIndex }),
+    };
   });
 }
 
@@ -308,11 +317,15 @@ async function countAnthropicTokens(params: ProviderTokenCountParams): Promise<n
       content: replayThinkingBlockForToolTurn ? [replayThinkingBlockForToolTurn, ...toolUseBlocks] : toolUseBlocks,
     });
 
-    const toolResultBlocks: Anthropic.ToolResultBlockParam[] = params.toolExecutions.map((te) => ({
+    const toolResultBlocks: Anthropic.ToolResultBlockParam[] = params.toolExecutions.map((te, index) => ({
       type: 'tool_result' as const,
       tool_use_id: te.toolCallId,
       content: te.result,
       is_error: te.isError,
+      cache_control:
+        index === params.toolExecutions.length - 1
+          ? ANTHROPIC_EPHEMERAL_CACHE_CONTROL
+          : undefined,
     }));
 
     anthropicMessages.push({

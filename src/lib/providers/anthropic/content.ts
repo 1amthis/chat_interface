@@ -5,10 +5,19 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ChatMessage } from '../types';
 
+interface AnthropicContentOptions {
+  cacheBreakpoint?: boolean;
+}
+
+const ANTHROPIC_EPHEMERAL_CACHE_CONTROL: Anthropic.CacheControlEphemeral = { type: 'ephemeral' };
+
 /**
  * Convert message to Anthropic format with multimodal support
  */
-export function toAnthropicContent(message: ChatMessage): Anthropic.ContentBlockParam[] {
+export function toAnthropicContent(
+  message: ChatMessage,
+  options?: AnthropicContentOptions
+): Anthropic.ContentBlockParam[] {
   const attachments = message.attachments || [];
   const projectFiles = message.projectFiles || [];
   const allAttachments = [...projectFiles, ...attachments];
@@ -53,6 +62,23 @@ export function toAnthropicContent(message: ChatMessage): Anthropic.ContentBlock
   // If no parts, add empty text
   if (parts.length === 0) {
     parts.push({ type: 'text', text: '' });
+  }
+
+  if (options?.cacheBreakpoint) {
+    const lastIndex = parts.length - 1;
+    const lastPart = parts[lastIndex];
+
+    if (lastPart?.type === 'text') {
+      parts[lastIndex] = {
+        ...lastPart,
+        cache_control: ANTHROPIC_EPHEMERAL_CACHE_CONTROL,
+      } satisfies Anthropic.TextBlockParam;
+    } else if (lastPart?.type === 'image') {
+      parts[lastIndex] = {
+        ...lastPart,
+        cache_control: ANTHROPIC_EPHEMERAL_CACHE_CONTROL,
+      } satisfies Anthropic.ImageBlockParam;
+    }
   }
 
   return parts;

@@ -11,6 +11,16 @@ import { anthropicWebSearchTool, anthropicGoogleDriveTool, anthropicMemorySearch
 import { isArtifactTool } from '../base';
 import { toAnthropicContent } from './content';
 
+const ANTHROPIC_EPHEMERAL_CACHE_CONTROL: Anthropic.CacheControlEphemeral = { type: 'ephemeral' };
+
+interface AnthropicUsageSnapshot {
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  thinking_tokens?: number | null;
+}
+
 /**
  * Stream chat using Anthropic Messages API
  */
@@ -42,8 +52,13 @@ export async function* streamAnthropic(
     },
   });
 
+  const lastUserMessageIndex = messages.reduce(
+    (lastIndex, msg, index) => (msg.role === 'user' ? index : lastIndex),
+    -1
+  );
+
   // System prompt only - search results are now handled as proper tool results
-  const anthropicMessages: Anthropic.MessageParam[] = messages.map((msg) => {
+  const anthropicMessages: Anthropic.MessageParam[] = messages.map((msg, index) => {
     if (msg.role === 'assistant') {
       // If message has content blocks (from paused streaming), reconstruct them
       if (msg.contentBlocks && msg.contentBlocks.length > 0) {
@@ -71,7 +86,10 @@ export async function* streamAnthropic(
       // If content is empty, this is likely an incomplete message - skip it or use minimal text
       return { role: 'assistant', content: msg.content || '...' };
     }
-    return { role: 'user', content: toAnthropicContent(msg) };
+    return {
+      role: 'user',
+      content: toAnthropicContent(msg, { cacheBreakpoint: index === lastUserMessageIndex }),
+    };
   });
 
   let replayThinkingBlockForToolTurn: Anthropic.ContentBlockParam | undefined;
@@ -106,11 +124,12 @@ export async function* streamAnthropic(
     });
 
     // Add user message with tool_result content blocks
-    const toolResultBlocks: Anthropic.ToolResultBlockParam[] = toolExecutions.map(te => ({
+    const toolResultBlocks: Anthropic.ToolResultBlockParam[] = toolExecutions.map((te, index) => ({
       type: 'tool_result' as const,
       tool_use_id: te.toolCallId,
       content: te.result,
       is_error: te.isError,
+      cache_control: index === toolExecutions.length - 1 ? ANTHROPIC_EPHEMERAL_CACHE_CONTROL : undefined,
     }));
 
     anthropicMessages.push({
@@ -191,6 +210,50 @@ export async function* streamAnthropic(
   let currentToolId = '';
   let currentToolInput = '';
   let currentThinkingSignature = '';
+
+  const applyUsageSnapshot = (usage: AnthropicUsageSnapshot | undefined) => {
+    if (!usage) return;
+
+    const inputTokensUsed =
+      typeof usage.input_tokens === 'number' && Number.isFinite(usage.input_tokens)
+        ? usage.input_tokens
+        : undefined;
+    const cacheReadInputTokens =
+      typeof usage.cache_read_input_tokens === 'number' && Number.isFinite(usage.cache_read_input_tokens)
+        ? usage.cache_read_input_tokens
+        : undefined;
+    const cacheCreationInputTokens =
+      typeof usage.cache_creation_input_tokens === 'number' && Number.isFinite(usage.cache_creation_input_tokens)
+        ? usage.cache_creation_input_tokens
+        : undefined;
+    const outputTokensUsed =
+      typeof usage.output_tokens === 'number' && Number.isFinite(usage.output_tokens)
+        ? usage.output_tokens
+        : undefined;
+    const thinkingTokens =
+      typeof usage.thinking_tokens === 'number' && Number.isFinite(usage.thinking_tokens)
+        ? usage.thinking_tokens
+        : undefined;
+
+    // Anthropic reports cached token buckets separately from input_tokens.
+    // For UI consistency across providers, normalize input as full input total.
+    if (
+      inputTokensUsed !== undefined ||
+      cacheReadInputTokens !== undefined ||
+      cacheCreationInputTokens !== undefined
+    ) {
+      inputTokens = (inputTokensUsed ?? 0) + (cacheReadInputTokens ?? 0) + (cacheCreationInputTokens ?? 0);
+    }
+    if (cacheReadInputTokens !== undefined) {
+      cachedTokens = cacheReadInputTokens;
+    }
+    if (outputTokensUsed !== undefined) {
+      outputTokens = outputTokensUsed;
+    }
+    if (thinkingTokens !== undefined) {
+      reasoningTokens = thinkingTokens;
+    }
+  };
 
   for await (const event of stream) {
     if (event.type === 'message_start') {
@@ -311,27 +374,10 @@ export async function* streamAnthropic(
 
     // Anthropic sends usage in message_start and message_delta events
     if (event.type === 'message_start' && event.message.usage) {
-      inputTokens = event.message.usage.input_tokens;
-      // Check for cache_read_input_tokens (prompt caching) and thinking_tokens (extended thinking)
-      const usage = event.message.usage as {
-        input_tokens: number;
-        cache_read_input_tokens?: number;
-        thinking_tokens?: number;
-      };
-      cachedTokens = usage.cache_read_input_tokens || 0;
-      // Thinking tokens may be reported in message_start or message_delta
-      reasoningTokens = usage.thinking_tokens || 0;
+      applyUsageSnapshot(event.message.usage as AnthropicUsageSnapshot);
     }
     if (event.type === 'message_delta' && event.usage) {
-      outputTokens = event.usage.output_tokens;
-      // Check for additional thinking tokens in message_delta
-      const usage = event.usage as {
-        output_tokens: number;
-        thinking_tokens?: number;
-      };
-      if (usage.thinking_tokens) {
-        reasoningTokens = usage.thinking_tokens;
-      }
+      applyUsageSnapshot(event.usage as AnthropicUsageSnapshot);
     }
   }
 
