@@ -108,6 +108,40 @@ function countToolExecutions(
   return toolExecutions.filter((execution) => execution.toolName === toolName).length;
 }
 
+function isToolCallEnabled(
+  toolName: string,
+  toolSource: ToolSource | undefined,
+  settings: ChatSettings,
+  googleDriveConnected: boolean
+): boolean {
+  if (toolName === 'web_search') return !!settings.webSearchEnabled;
+  if (toolName === 'google_drive_search') return !!settings.googleDriveEnabled && googleDriveConnected;
+  if (toolName === 'memory_search') return !!settings.memorySearchEnabled;
+  if (toolName === 'rag_search') return !!settings.ragEnabled;
+  if (isArtifactTool(toolName)) return settings.artifactsEnabled !== false;
+  if (toolSource === 'mcp') return !!settings.mcpEnabled;
+  return true;
+}
+
+function getDisabledToolMessage(toolName: string): string {
+  switch (toolName) {
+    case 'web_search':
+      return 'Web search is currently disabled from the chat toolbar.';
+    case 'google_drive_search':
+      return 'Google Drive search is currently disabled from the chat toolbar.';
+    case 'memory_search':
+      return 'Memory search is currently disabled from the chat toolbar.';
+    case 'rag_search':
+      return 'Document search is currently disabled from the chat toolbar.';
+    case 'create_artifact':
+    case 'update_artifact':
+    case 'read_artifact':
+      return 'Artifact tools are currently disabled from the chat toolbar.';
+    default:
+      return `Tool "${toolName}" is currently disabled from the chat toolbar.`;
+  }
+}
+
 function formatWebSearchResultsForToolResponse(result: WebSearchResponse, citationBatch?: number): string {
   if (result.results.length === 0) {
     return `Web search for "${result.query}" returned no results.`;
@@ -383,6 +417,31 @@ export function Chat() {
 
   const handleToggleGoogleDrive = useCallback(() => {
     const newSettings = { ...settings, googleDriveEnabled: !settings.googleDriveEnabled };
+    saveSettings(newSettings);
+    setSettings(newSettings);
+  }, [settings]);
+
+  const handleToggleMemorySearch = useCallback(() => {
+    const newSettings = { ...settings, memorySearchEnabled: !settings.memorySearchEnabled };
+    saveSettings(newSettings);
+    setSettings(newSettings);
+  }, [settings]);
+
+  const handleToggleRAG = useCallback(() => {
+    const newSettings = { ...settings, ragEnabled: !settings.ragEnabled };
+    saveSettings(newSettings);
+    setSettings(newSettings);
+  }, [settings]);
+
+  const handleToggleArtifacts = useCallback(() => {
+    const currentlyEnabled = settings.artifactsEnabled !== false;
+    const newSettings = { ...settings, artifactsEnabled: !currentlyEnabled };
+    saveSettings(newSettings);
+    setSettings(newSettings);
+  }, [settings]);
+
+  const handleToggleMCP = useCallback(() => {
+    const newSettings = { ...settings, mcpEnabled: !settings.mcpEnabled };
     saveSettings(newSettings);
     setSettings(newSettings);
   }, [settings]);
@@ -879,6 +938,51 @@ export function Chat() {
               contentBlocksAccumulator.push({ type: 'tool_call', toolCall });
               setStreamingContentBlocks([...contentBlocksAccumulator]);
 
+              const toolEnabled = isToolCallEnabled(
+                toolName,
+                toolSource,
+                settings,
+                !!settings.googleDriveAccessToken
+              );
+              if (!toolEnabled) {
+                const disabledMessage = getDisabledToolMessage(toolName);
+                const toolCallIndex = toolCallsAccumulator.findIndex(tc => tc.id === toolCall.id);
+                if (toolCallIndex !== -1) {
+                  const updatedToolCall = {
+                    ...toolCall,
+                    status: 'error' as const,
+                    result: disabledMessage,
+                    error: disabledMessage,
+                    completedAt: Date.now(),
+                  };
+                  toolCallsAccumulator[toolCallIndex] = updatedToolCall;
+                  setCurrentToolCalls([...toolCallsAccumulator]);
+
+                  const blockIndex = contentBlocksAccumulator.findIndex(
+                    b => b.type === 'tool_call' && b.toolCall.id === toolCall.id
+                  );
+                  if (blockIndex !== -1) {
+                    contentBlocksAccumulator[blockIndex] = { type: 'tool_call', toolCall: updatedToolCall };
+                    setStreamingContentBlocks([...contentBlocksAccumulator]);
+                  }
+                }
+
+                const toolExecution: ToolExecutionResult = {
+                  toolCallId: toolCall.id,
+                  toolName,
+                  originalToolName,
+                  toolParams,
+                  result: disabledMessage,
+                  isError: true,
+                  anthropicThinkingSignature,
+                  anthropicThinking,
+                  geminiThoughtSignature: anthropicThinkingSignature,
+                };
+                const allExecs = [...(toolExecutions || []), toolExecution];
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
+                return;
+              }
+
               // Handle based on source
               if (toolSource === 'mcp' || toolSource === 'builtin') {
                 // MCP or builtin tool call
@@ -1181,6 +1285,22 @@ export function Chat() {
                 let isError = false;
 
                 let structuredResult: unknown = null;
+                const toolEnabled = isToolCallEnabled(
+                  tc.name,
+                  tc.source,
+                  settings,
+                  !!settings.googleDriveAccessToken
+                );
+                if (!toolEnabled) {
+                  return {
+                    toolCall,
+                    tc,
+                    formattedResult: getDisabledToolMessage(tc.name),
+                    isError: true,
+                    structuredResult: null,
+                  };
+                }
+
                 try {
                   if (tc.name === 'web_search') {
                     const citationBatch = citationBatchByToolCallId.get(toolCall.id);
@@ -1788,6 +1908,14 @@ export function Chat() {
               onToggleGoogleDrive={handleToggleGoogleDrive}
               googleDriveConnected={!!settings.googleDriveAccessToken}
               onPickDriveFile={handlePickDriveFile}
+              memorySearchEnabled={settings.memorySearchEnabled}
+              onToggleMemorySearch={handleToggleMemorySearch}
+              ragEnabled={settings.ragEnabled}
+              onToggleRAG={handleToggleRAG}
+              artifactsEnabled={settings.artifactsEnabled}
+              onToggleArtifacts={handleToggleArtifacts}
+              mcpEnabled={settings.mcpEnabled}
+              onToggleMCP={handleToggleMCP}
               currentProvider={activeProjectProvider}
               currentModel={activeProjectModel}
               onModelChange={handleModelChange}
@@ -1888,6 +2016,14 @@ export function Chat() {
               onToggleGoogleDrive={handleToggleGoogleDrive}
               googleDriveConnected={!!settings.googleDriveAccessToken}
               onPickDriveFile={handlePickDriveFile}
+              memorySearchEnabled={settings.memorySearchEnabled}
+              onToggleMemorySearch={handleToggleMemorySearch}
+              ragEnabled={settings.ragEnabled}
+              onToggleRAG={handleToggleRAG}
+              artifactsEnabled={settings.artifactsEnabled}
+              onToggleArtifacts={handleToggleArtifacts}
+              mcpEnabled={settings.mcpEnabled}
+              onToggleMCP={handleToggleMCP}
               currentProvider={settings.provider}
               currentModel={settings.model}
               onModelChange={handleModelChange}

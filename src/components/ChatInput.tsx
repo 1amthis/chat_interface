@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo, useCallback, KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Attachment, Provider } from '@/types';
 import { generateId } from '@/lib/storage';
 import {
@@ -25,6 +25,14 @@ interface ChatInputProps {
   onToggleGoogleDrive?: () => void;
   googleDriveConnected?: boolean;
   onPickDriveFile?: () => void;
+  memorySearchEnabled?: boolean;
+  onToggleMemorySearch?: () => void;
+  ragEnabled?: boolean;
+  onToggleRAG?: () => void;
+  artifactsEnabled?: boolean;
+  onToggleArtifacts?: () => void;
+  mcpEnabled?: boolean;
+  onToggleMCP?: () => void;
   currentProvider: Provider;
   currentModel: string;
   onModelChange?: (model: string) => void;
@@ -46,6 +54,14 @@ export function ChatInput({
   onToggleGoogleDrive,
   googleDriveConnected,
   onPickDriveFile,
+  memorySearchEnabled,
+  onToggleMemorySearch,
+  ragEnabled,
+  onToggleRAG,
+  artifactsEnabled,
+  onToggleArtifacts,
+  mcpEnabled,
+  onToggleMCP,
   currentProvider,
   currentModel,
   onModelChange,
@@ -60,9 +76,11 @@ export function ChatInput({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [visionBannerDismissed, setVisionBannerDismissed] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
 
   // Reset vision banner dismissal when model/provider changes
@@ -76,6 +94,30 @@ export function ChatInput({
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [input]);
+
+  useEffect(() => {
+    if (!showToolsMenu) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(target)) {
+        setShowToolsMenu(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowToolsMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showToolsMenu]);
 
   // Vision awareness
   const hasImages = useMemo(
@@ -99,15 +141,36 @@ export function ChatInput({
     [hasImages, supportsVision, currentProvider, currentModel, availableModels, customModels],
   );
 
+  const enabledToolCount = useMemo(() => {
+    let count = 0;
+    if (webSearchEnabled) count += 1;
+    if (googleDriveEnabled && googleDriveConnected) count += 1;
+    if (memorySearchEnabled) count += 1;
+    if (ragEnabled) count += 1;
+    if (artifactsEnabled !== false) count += 1;
+    if (mcpEnabled) count += 1;
+    return count;
+  }, [
+    webSearchEnabled,
+    googleDriveEnabled,
+    googleDriveConnected,
+    memorySearchEnabled,
+    ragEnabled,
+    artifactsEnabled,
+    mcpEnabled,
+  ]);
+  const artifactsToolsEnabled = artifactsEnabled !== false;
+
   const handleSubmit = () => {
     if ((input.trim() || attachments.length > 0) && !isLoading) {
       onSend(input.trim(), attachments);
       setInput('');
       setAttachments([]);
+      setShowToolsMenu(false);
     }
   };
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -376,45 +439,103 @@ export function ChatInput({
               {/* Divider */}
               <div className="w-px h-5 bg-[var(--border-color)]" />
 
-              {/* Web Search Toggle */}
-              <button
-                onClick={onToggleWebSearch}
-                disabled={isLoading}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 ${
-                  webSearchEnabled
-                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-[var(--border-color)]'
-                }`}
-                title={webSearchEnabled ? 'Web search enabled' : 'Enable web search'}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                </svg>
-                <span className="hidden sm:inline">Web</span>
-              </button>
+              {/* Tools menu */}
+              <div className="relative" ref={toolsMenuRef}>
+                <button
+                  onClick={() => setShowToolsMenu((prev) => !prev)}
+                  disabled={isLoading}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 ${
+                    enabledToolCount > 0
+                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-[var(--border-color)]'
+                  }`}
+                  title="Configure tools"
+                  aria-expanded={showToolsMenu}
+                  aria-label="Configure tools"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317a1.724 1.724 0 013.35 0 1.724 1.724 0 002.573 1.066 1.724 1.724 0 012.32 2.32 1.724 1.724 0 001.065 2.572 1.724 1.724 0 010 3.35 1.724 1.724 0 00-1.065 2.573 1.724 1.724 0 01-2.32 2.32 1.724 1.724 0 00-2.573 1.065 1.724 1.724 0 01-3.35 0 1.724 1.724 0 00-2.572-1.065 1.724 1.724 0 01-2.32-2.32 1.724 1.724 0 00-1.066-2.573 1.724 1.724 0 010-3.35 1.724 1.724 0 001.066-2.572 1.724 1.724 0 012.32-2.32 1.724 1.724 0 002.572-1.066z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
+                  </svg>
+                  <span className="hidden sm:inline">Tools</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--background)]/80 border border-[var(--border-color)]">
+                    {enabledToolCount}
+                  </span>
+                </button>
 
-              {/* Google Drive Search Toggle */}
-              <button
-                onClick={googleDriveConnected ? onToggleGoogleDrive : undefined}
-                disabled={isLoading || !googleDriveConnected}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 ${
-                  googleDriveEnabled && googleDriveConnected
-                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-[var(--border-color)]'
-                } ${!googleDriveConnected ? 'cursor-not-allowed' : ''}`}
-                title={
-                  !googleDriveConnected
-                    ? 'Connect Google Drive in Settings'
-                    : googleDriveEnabled
-                    ? 'Google Drive search enabled'
-                    : 'Enable Google Drive search'
-                }
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M7.71 3.5L1.15 15l4.58 7.5h13.54l4.58-7.5L17.29 3.5H7.71zm.79 1h8l5.14 10L17.5 21h-11l-4.14-6.5 5.14-10z"/>
-                </svg>
-                <span className="hidden sm:inline">Drive</span>
-              </button>
+                {showToolsMenu && (
+                  <div className="absolute left-0 bottom-full mb-2 z-30 w-72 rounded-xl border border-[var(--border-color)] bg-[var(--background)] shadow-xl p-2 space-y-1">
+                    <div className="px-2 py-1 text-xs font-medium text-gray-500">Tool Controls</div>
+
+                    <button
+                      onClick={onToggleWebSearch}
+                      disabled={isLoading || !onToggleWebSearch}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-sm hover:bg-[var(--border-color)]/60 disabled:opacity-50"
+                    >
+                      <span>Web Search</span>
+                      <span className={`w-9 h-5 rounded-full p-0.5 transition-colors ${webSearchEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${webSearchEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={googleDriveConnected ? onToggleGoogleDrive : undefined}
+                      disabled={isLoading || !googleDriveConnected || !onToggleGoogleDrive}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-sm hover:bg-[var(--border-color)]/60 disabled:opacity-50"
+                      title={!googleDriveConnected ? 'Connect Google Drive in Settings' : undefined}
+                    >
+                      <span>Google Drive</span>
+                      <span className={`w-9 h-5 rounded-full p-0.5 transition-colors ${(googleDriveEnabled && googleDriveConnected) ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${(googleDriveEnabled && googleDriveConnected) ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={onToggleMemorySearch}
+                      disabled={isLoading || !onToggleMemorySearch}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-sm hover:bg-[var(--border-color)]/60 disabled:opacity-50"
+                    >
+                      <span>Memory Search</span>
+                      <span className={`w-9 h-5 rounded-full p-0.5 transition-colors ${memorySearchEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${memorySearchEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={onToggleRAG}
+                      disabled={isLoading || !onToggleRAG}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-sm hover:bg-[var(--border-color)]/60 disabled:opacity-50"
+                    >
+                      <span>Document Search</span>
+                      <span className={`w-9 h-5 rounded-full p-0.5 transition-colors ${ragEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${ragEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={onToggleArtifacts}
+                      disabled={isLoading || !onToggleArtifacts}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-sm hover:bg-[var(--border-color)]/60 disabled:opacity-50"
+                    >
+                      <span>Artifacts</span>
+                      <span className={`w-9 h-5 rounded-full p-0.5 transition-colors ${artifactsToolsEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${artifactsToolsEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={onToggleMCP}
+                      disabled={isLoading || !onToggleMCP}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-sm hover:bg-[var(--border-color)]/60 disabled:opacity-50"
+                    >
+                      <span>MCP Tools</span>
+                      <span className={`w-9 h-5 rounded-full p-0.5 transition-colors ${mcpEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${mcpEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* Divider */}
               <div className="w-px h-5 bg-[var(--border-color)]" />

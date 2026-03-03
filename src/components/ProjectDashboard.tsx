@@ -29,6 +29,14 @@ interface ProjectDashboardProps {
   onToggleGoogleDrive?: () => void;
   googleDriveConnected?: boolean;
   onPickDriveFile?: () => void;
+  memorySearchEnabled?: boolean;
+  onToggleMemorySearch?: () => void;
+  ragEnabled?: boolean;
+  onToggleRAG?: () => void;
+  artifactsEnabled?: boolean;
+  onToggleArtifacts?: () => void;
+  mcpEnabled?: boolean;
+  onToggleMCP?: () => void;
   currentProvider: Provider;
   currentModel: string;
   onModelChange?: (model: string) => void;
@@ -56,6 +64,14 @@ export function ProjectDashboard({
   onToggleGoogleDrive,
   googleDriveConnected,
   onPickDriveFile,
+  memorySearchEnabled,
+  onToggleMemorySearch,
+  ragEnabled,
+  onToggleRAG,
+  artifactsEnabled,
+  onToggleArtifacts,
+  mcpEnabled,
+  onToggleMCP,
   currentProvider,
   currentModel,
   onModelChange,
@@ -360,6 +376,14 @@ export function ProjectDashboard({
         onToggleGoogleDrive={onToggleGoogleDrive}
         googleDriveConnected={googleDriveConnected}
         onPickDriveFile={onPickDriveFile}
+        memorySearchEnabled={memorySearchEnabled}
+        onToggleMemorySearch={onToggleMemorySearch}
+        ragEnabled={ragEnabled}
+        onToggleRAG={onToggleRAG}
+        artifactsEnabled={artifactsEnabled}
+        onToggleArtifacts={onToggleArtifacts}
+        mcpEnabled={mcpEnabled}
+        onToggleMCP={onToggleMCP}
         currentProvider={currentProvider}
         currentModel={currentModel}
         onModelChange={onModelChange}
