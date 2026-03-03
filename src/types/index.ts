@@ -149,7 +149,7 @@ export interface MCPServerConfig {
   headers?: Record<string, string>;
 }
 
-export type ToolSource = 'builtin' | 'mcp' | 'web_search' | 'google_drive' | 'memory_search' | 'rag_search' | 'artifact';
+export type ToolSource = 'builtin' | 'mcp' | 'web_search' | 'google_drive' | 'memory_search' | 'rag_search' | 'artifact' | 'ask_question';
 
 export interface BuiltinToolsConfig {
   filesystem?: {
@@ -351,6 +351,24 @@ export interface WebSearchResponse {
   query: string;
   results: WebSearchResult[];
   timestamp: number;
+}
+
+export interface AskQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface AskQuestionPrompt {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options: AskQuestionOption[];
+}
+
+export interface AskQuestionToolResult {
+  __ask_question__: true;
+  status: 'awaiting_user_input';
+  questions: AskQuestionPrompt[];
 }
 
 // Tool Call Types for visualization

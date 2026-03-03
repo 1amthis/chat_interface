@@ -1,15 +1,22 @@
 // Shared tool schemas used by provider adapters and UI catalog views.
 
+interface ToolSchemaProperty {
+  type: string;
+  description?: string;
+  enum?: string[];
+  items?: ToolSchemaProperty;
+  properties?: Record<string, ToolSchemaProperty>;
+  required?: string[];
+  minItems?: number;
+  maxItems?: number;
+}
+
 export interface ToolSchema {
   name: string;
   description: string;
   parameters: {
     type: 'object';
-    properties: Record<string, {
-      type: string;
-      description: string;
-      enum?: string[];
-    }>;
+    properties: Record<string, ToolSchemaProperty>;
     required: string[];
   };
 }
@@ -71,6 +78,61 @@ export const RAG_SEARCH_SCHEMA: ToolSchema = {
       },
     },
     required: ['query'],
+  },
+};
+
+export const ASK_QUESTION_SCHEMA: ToolSchema = {
+  name: 'ask_question',
+  description: 'Ask one or more structured clarifying questions to the user when required information is missing. Use this instead of guessing. After calling this tool, wait for the user\'s answer before proceeding.',
+  parameters: {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        description: 'List of questions to ask the user (typically 1, maximum 4).',
+        minItems: 1,
+        maxItems: 4,
+        items: {
+          type: 'object',
+          properties: {
+            question: {
+              type: 'string',
+              description: 'The main question text shown to the user.',
+            },
+            header: {
+              type: 'string',
+              description: 'Optional short header label for the question.',
+            },
+            multiSelect: {
+              type: 'boolean',
+              description: 'Whether the user may select multiple options for this question.',
+            },
+            options: {
+              type: 'array',
+              description: '2-4 suggested options to help the user answer quickly.',
+              minItems: 2,
+              maxItems: 4,
+              items: {
+                type: 'object',
+                properties: {
+                  label: {
+                    type: 'string',
+                    description: 'Short user-visible option label.',
+                  },
+                  description: {
+                    type: 'string',
+                    description: 'One-sentence explanation of the option.',
+                  },
+                },
+                required: ['label', 'description'],
+              },
+            },
+          },
+          required: ['question'],
+        },
+      },
+    },
+    required: ['questions'],
   },
 };
 

@@ -19,6 +19,7 @@ export { mergeSystemPrompts, isOpenAIReasoningModel, generateGeminiToolCallId, b
 
 // Re-export tool definitions
 export {
+  ASK_QUESTION_SCHEMA,
   WEB_SEARCH_SCHEMA,
   GOOGLE_DRIVE_SCHEMA,
   MEMORY_SEARCH_SCHEMA,
@@ -28,6 +29,7 @@ export {
   openAIGoogleDriveTool,
   openAIMemorySearchTool,
   openAIRAGSearchTool,
+  openAIAskQuestionTool,
   openAICreateArtifactTool,
   openAIUpdateArtifactTool,
   openAIReadArtifactTool,
@@ -35,6 +37,7 @@ export {
   anthropicGoogleDriveTool,
   anthropicMemorySearchTool,
   anthropicRAGSearchTool,
+  anthropicAskQuestionTool,
   anthropicCreateArtifactTool,
   anthropicUpdateArtifactTool,
   anthropicReadArtifactTool,
@@ -42,6 +45,7 @@ export {
   geminiGoogleDriveDeclaration,
   geminiMemorySearchDeclaration,
   geminiRAGSearchDeclaration,
+  geminiAskQuestionDeclaration,
   geminiCreateArtifactDeclaration,
   geminiUpdateArtifactDeclaration,
   geminiReadArtifactDeclaration,

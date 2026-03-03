@@ -194,6 +194,7 @@ export async function POST(request: NextRequest) {
     if (googleDriveEnabled) builtinToolCount++;
     if (memorySearchEnabled) builtinToolCount++;
     if (ragEnabled) builtinToolCount++;
+    builtinToolCount++; // ask_question
     if (artifactsEnabled) builtinToolCount += 3; // create, update, read
     const toolDefsText = JSON.stringify(allTools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })));
     const toolTokens = estimateTokens(toolDefsText) + (builtinToolCount * 150); // ~150 tokens per built-in tool

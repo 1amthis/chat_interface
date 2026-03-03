@@ -10,7 +10,7 @@ import { ChatMessage, StreamChunk, ToolCallInfo, ToolExecutionResult } from '../
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
 import { toolCallLimitReached } from '../base';
 import { toOpenAITools, parseToolName } from '@/lib/mcp/tool-converter';
-import { openAIWebSearchTool, openAIGoogleDriveTool, openAIMemorySearchTool, openAIRAGSearchTool, openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool } from '../tools/definitions';
+import { openAIWebSearchTool, openAIGoogleDriveTool, openAIMemorySearchTool, openAIRAGSearchTool, openAIAskQuestionTool, openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool } from '../tools/definitions';
 import { isArtifactTool } from '../base';
 import { toMistralContent } from './content';
 
@@ -125,6 +125,9 @@ export async function* streamMistral(
   }
   if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
     tools.push(openAIRAGSearchTool);
+  }
+  if (!toolCallLimitReached('ask_question', toolExecutions)) {
+    tools.push(openAIAskQuestionTool);
   }
   // Add MCP/builtin tools (with per-tool call limit to prevent loops)
   if (mcpTools && mcpTools.length > 0) {
@@ -264,6 +267,14 @@ export async function* streamMistral(
               originalName: tc.name,
               params: { query: args.query },
               source: 'rag_search',
+            });
+          } else if (tc.name === 'ask_question') {
+            parsedToolCalls.push({
+              id: tc.id,
+              name: tc.name,
+              originalName: tc.name,
+              params: args,
+              source: 'ask_question',
             });
           } else if (isArtifactTool(tc.name)) {
             parsedToolCalls.push({

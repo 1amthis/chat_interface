@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Message, Conversation, ChatSettings, DEFAULT_SETTINGS, DEFAULT_MODELS, Provider, Attachment, TokenUsage, Project, WebSearchResponse, GoogleDriveSearchResponse, ToolCall, ToolSource, ContentBlock, Artifact, ArtifactContentBlock, ReasoningContentBlock, ContextBreakdown } from '@/types';
+import { Message, Conversation, ChatSettings, DEFAULT_SETTINGS, DEFAULT_MODELS, Provider, Attachment, TokenUsage, Project, WebSearchResponse, GoogleDriveSearchResponse, ToolCall, ToolSource, ContentBlock, Artifact, ArtifactContentBlock, ReasoningContentBlock, ContextBreakdown, AskQuestionOption, AskQuestionPrompt, AskQuestionToolResult } from '@/types';
 import type { ToolExecutionResult } from '@/lib/providers';
 import {
   getConversations,
@@ -166,6 +166,183 @@ function formatWebSearchResultsForToolResponse(result: WebSearchResponse, citati
   return formatted;
 }
 
+function parseAskQuestionOptions(value: unknown): AskQuestionOption[] {
+  if (!Array.isArray(value)) return [];
+
+  const options: AskQuestionOption[] = [];
+  for (const option of value) {
+    if (typeof option === 'string') {
+      const label = option.trim();
+      if (label) options.push({ label });
+      continue;
+    }
+
+    if (!option || typeof option !== 'object') continue;
+    const optionObj = option as Record<string, unknown>;
+    const label = typeof optionObj.label === 'string' ? optionObj.label.trim() : '';
+    if (!label) continue;
+
+    const description = typeof optionObj.description === 'string'
+      ? optionObj.description.trim()
+      : undefined;
+
+    options.push({ label, ...(description ? { description } : {}) });
+  }
+
+  return options.slice(0, 4);
+}
+
+function normalizeAskQuestionPrompts(params: Record<string, unknown>): AskQuestionPrompt[] {
+  const prompts: AskQuestionPrompt[] = [];
+
+  if (Array.isArray(params.questions)) {
+    for (const rawQuestion of params.questions) {
+      if (!rawQuestion || typeof rawQuestion !== 'object') continue;
+      const questionObj = rawQuestion as Record<string, unknown>;
+
+      const question = typeof questionObj.question === 'string'
+        ? questionObj.question.trim()
+        : '';
+      if (!question) continue;
+
+      const header = typeof questionObj.header === 'string'
+        ? questionObj.header.trim()
+        : undefined;
+      const multiSelect = typeof questionObj.multiSelect === 'boolean'
+        ? questionObj.multiSelect
+        : undefined;
+      const options = parseAskQuestionOptions(questionObj.options);
+
+      prompts.push({
+        question,
+        ...(header ? { header } : {}),
+        ...(multiSelect !== undefined ? { multiSelect } : {}),
+        options,
+      });
+    }
+  }
+
+  // Backward compatibility for single-question shape: { question, options?, header?, multiSelect? }
+  if (prompts.length === 0 && typeof params.question === 'string') {
+    const question = params.question.trim();
+    if (question) {
+      const header = typeof params.header === 'string' ? params.header.trim() : undefined;
+      const multiSelect = typeof params.multiSelect === 'boolean' ? params.multiSelect : undefined;
+      const options = parseAskQuestionOptions(params.options);
+      prompts.push({
+        question,
+        ...(header ? { header } : {}),
+        ...(multiSelect !== undefined ? { multiSelect } : {}),
+        options,
+      });
+    }
+  }
+
+  return prompts.slice(0, 4);
+}
+
+function formatAskQuestionForMessage(prompts: AskQuestionPrompt[]): string {
+  const lines: string[] = ['I need your input before I can continue:'];
+
+  prompts.forEach((prompt, index) => {
+    lines.push('');
+
+    const heading = prompt.header?.trim() || `Question ${index + 1}`;
+    lines.push(`${index + 1}. ${heading}`);
+    lines.push(prompt.question);
+
+    if (prompt.options.length > 0) {
+      prompt.options.forEach((option, optionIndex) => {
+        const letter = String.fromCharCode(65 + optionIndex);
+        const suffix = option.description ? ` — ${option.description}` : '';
+        lines.push(`   ${letter}) ${option.label}${suffix}`);
+      });
+    }
+
+    if (prompt.multiSelect) {
+      lines.push('   You can select multiple options.');
+    }
+  });
+
+  lines.push('');
+  lines.push('Reply with your choice(s) and any extra details.');
+
+  return lines.join('\n');
+}
+
+function executeAskQuestionTool(
+  params: Record<string, unknown>
+): { isError: boolean; structuredResult: AskQuestionToolResult | null; formattedResult: string; messageText?: string } {
+  const prompts = normalizeAskQuestionPrompts(params);
+  if (prompts.length === 0) {
+    return {
+      isError: true,
+      structuredResult: null,
+      formattedResult: 'Error: ask_question requires a non-empty question (or questions array).',
+    };
+  }
+
+  const structuredResult: AskQuestionToolResult = {
+    __ask_question__: true,
+    status: 'awaiting_user_input',
+    questions: prompts,
+  };
+
+  return {
+    isError: false,
+    structuredResult,
+    formattedResult: JSON.stringify(structuredResult),
+    messageText: formatAskQuestionForMessage(prompts),
+  };
+}
+
+function parseAskQuestionToolResult(result: unknown): AskQuestionToolResult | null {
+  if (result && typeof result === 'object') {
+    const maybeResult = result as Partial<AskQuestionToolResult>;
+    if (
+      maybeResult.__ask_question__ === true &&
+      maybeResult.status === 'awaiting_user_input' &&
+      Array.isArray(maybeResult.questions)
+    ) {
+      return maybeResult as AskQuestionToolResult;
+    }
+  }
+
+  if (typeof result === 'string') {
+    try {
+      const parsed = JSON.parse(result);
+      if (parsed && typeof parsed === 'object') {
+        return parseAskQuestionToolResult(parsed);
+      }
+    } catch {
+      // ignore JSON parsing errors
+    }
+  }
+
+  return null;
+}
+
+function getPendingAskQuestionFromMessage(message: Message | null | undefined): AskQuestionToolResult | null {
+  if (!message || message.role !== 'assistant') return null;
+
+  const orderedToolCalls = message.contentBlocks
+    ?.filter((block): block is { type: 'tool_call'; toolCall: ToolCall } => block.type === 'tool_call')
+    .map((block) => block.toolCall);
+
+  const toolCalls = orderedToolCalls && orderedToolCalls.length > 0
+    ? orderedToolCalls
+    : message.toolCalls || [];
+
+  for (let i = toolCalls.length - 1; i >= 0; i -= 1) {
+    const toolCall = toolCalls[i];
+    if (toolCall.name !== 'ask_question' || toolCall.status !== 'completed') continue;
+    const parsed = parseAskQuestionToolResult(toolCall.result);
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
 export function Chat() {
   // Core state
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -264,6 +441,12 @@ export function Chat() {
     }
     return map;
   }, [currentConversation, displayMessages]);
+
+  const pendingAskQuestion = useMemo(() => {
+    if (displayMessages.length === 0) return null;
+    const lastMessage = displayMessages[displayMessages.length - 1];
+    return getPendingAskQuestionFromMessage(lastMessage);
+  }, [displayMessages]);
 
   useEffect(() => {
     setConversations(getConversations());
@@ -762,6 +945,8 @@ export function Chat() {
       let currentReasoningContent = '';
       // Buffer SSE chunks to handle event boundaries correctly
       let sseBuffer = '';
+      // ask_question should end this assistant turn and wait for user response
+      let shouldFinalizeAfterUserQuestion = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1101,6 +1286,60 @@ export function Chat() {
                 const allExecs = [...(toolExecutions || []), toolExecution];
                 await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
                 return;
+              } else if (toolName === 'ask_question') {
+                const askQuestionResult = executeAskQuestionTool(toolParams);
+
+                const toolCallIndex = toolCallsAccumulator.findIndex(tc => tc.id === toolCall.id);
+                if (toolCallIndex !== -1) {
+                  const updatedToolCall = {
+                    ...toolCall,
+                    status: askQuestionResult.isError ? 'error' as const : 'completed' as const,
+                    result: askQuestionResult.structuredResult || askQuestionResult.formattedResult,
+                    error: askQuestionResult.isError ? askQuestionResult.formattedResult : undefined,
+                    completedAt: Date.now(),
+                  };
+                  toolCallsAccumulator[toolCallIndex] = updatedToolCall;
+                  setCurrentToolCalls([...toolCallsAccumulator]);
+
+                  const blockIndex = contentBlocksAccumulator.findIndex(
+                    b => b.type === 'tool_call' && b.toolCall.id === toolCall.id
+                  );
+                  if (blockIndex !== -1) {
+                    contentBlocksAccumulator[blockIndex] = { type: 'tool_call', toolCall: updatedToolCall };
+                  }
+                }
+
+                if (askQuestionResult.isError) {
+                  const toolExecution: ToolExecutionResult = {
+                    toolCallId: toolCall.id,
+                    toolName,
+                    originalToolName,
+                    toolParams,
+                    result: askQuestionResult.formattedResult,
+                    isError: true,
+                    anthropicThinkingSignature,
+                    anthropicThinking,
+                    geminiThoughtSignature: anthropicThinkingSignature,
+                  };
+
+                  const allExecs = [...(toolExecutions || []), toolExecution];
+                  await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
+                  return;
+                }
+
+                if (askQuestionResult.messageText) {
+                  contentBlocksAccumulator.push({ type: 'text', text: askQuestionResult.messageText });
+                }
+
+                setStreamingContentBlocks([...contentBlocksAccumulator]);
+                const fullText = contentBlocksAccumulator
+                  .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+                  .map(b => b.text)
+                  .join('');
+                setStreamingContent(fullText);
+
+                shouldFinalizeAfterUserQuestion = true;
+                break;
               } else if (toolName === 'web_search' || toolName === 'google_drive_search' || toolName === 'memory_search' || toolName === 'rag_search') {
                 // Web search, Google Drive search, or Memory search - handle as proper tool results
                 const searchQuery = toolParams.query as string;
@@ -1282,6 +1521,7 @@ export function Chat() {
                 const toolCall = newToolCalls[i];
                 let formattedResult = '';
                 let isError = false;
+                let askMessageText: string | undefined;
 
                 let structuredResult: unknown = null;
                 const toolEnabled = isToolCallEnabled(
@@ -1297,6 +1537,7 @@ export function Chat() {
                     formattedResult: getDisabledToolMessage(tc.name),
                     isError: true,
                     structuredResult: null,
+                    askMessageText: undefined,
                   };
                 }
 
@@ -1351,6 +1592,12 @@ export function Chat() {
                       formattedResult = 'Document search failed.';
                       isError = true;
                     }
+                  } else if (tc.name === 'ask_question') {
+                    const askQuestionResult = executeAskQuestionTool(tc.params);
+                    formattedResult = askQuestionResult.formattedResult;
+                    isError = askQuestionResult.isError;
+                    structuredResult = askQuestionResult.structuredResult;
+                    askMessageText = askQuestionResult.messageText;
                   } else if (isArtifactTool(tc.name)) {
                     const allCurrentArtifacts = [...(conv.artifacts || []), ...streamingArtifactsRef.current];
                     const artifactResult = performArtifactToolCall(tc.name, tc.params, allCurrentArtifacts);
@@ -1384,13 +1631,16 @@ export function Chat() {
                   isError = true;
                 }
 
-                return { toolCall, tc, formattedResult, isError, structuredResult };
+                return { toolCall, tc, formattedResult, isError, structuredResult, askMessageText };
               });
 
               const results = await Promise.all(toolCallPromises);
 
+              let askQuestionMessage: string | null = null;
+              let hasSuccessfulAskQuestion = false;
+
               // Batch state updates after all promises resolve
-              for (const { toolCall, tc, formattedResult, isError, structuredResult } of results) {
+              for (const { toolCall, tc, formattedResult, isError, structuredResult, askMessageText } of results) {
                 const toolCallIndex = toolCallsAccumulator.findIndex(t => t.id === toolCall.id);
                 if (toolCallIndex !== -1) {
                   const updatedToolCall = {
@@ -1410,6 +1660,13 @@ export function Chat() {
                   }
                 }
 
+                if (tc.name === 'ask_question' && !isError) {
+                  hasSuccessfulAskQuestion = true;
+                  if (!askQuestionMessage && askMessageText) {
+                    askQuestionMessage = askMessageText;
+                  }
+                }
+
                 // Add artifact content block for create/update artifact tool calls
                 if (isArtifactTool(tc.name) && !isError) {
                   try {
@@ -1425,20 +1682,36 @@ export function Chat() {
                   }
                 }
 
-                allToolExecutions.push({
-                  toolCallId: toolCall.id,
-                  toolName: tc.name,
-                  originalToolName: tc.originalName || tc.name,
-                  toolParams: tc.params,
-                  result: formattedResult,
-                  isError,
-                  geminiThoughtSignature: tc.thoughtSignature,
-                });
+                if (!(tc.name === 'ask_question' && !isError)) {
+                  allToolExecutions.push({
+                    toolCallId: toolCall.id,
+                    toolName: tc.name,
+                    originalToolName: tc.originalName || tc.name,
+                    toolParams: tc.params,
+                    result: formattedResult,
+                    isError,
+                    geminiThoughtSignature: tc.thoughtSignature,
+                  });
+                }
+              }
+
+              if (hasSuccessfulAskQuestion && askQuestionMessage) {
+                contentBlocksAccumulator.push({ type: 'text', text: askQuestionMessage });
               }
 
               // Update UI once after all tool calls complete
               setCurrentToolCalls([...toolCallsAccumulator]);
               setStreamingContentBlocks([...contentBlocksAccumulator]);
+              const fullText = contentBlocksAccumulator
+                .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+                .map(b => b.text)
+                .join('');
+              setStreamingContent(fullText);
+
+              if (hasSuccessfulAskQuestion) {
+                shouldFinalizeAfterUserQuestion = true;
+                break;
+              }
 
               // If we have any tool executions, continue with them
               // Pass content blocks to preserve text and tool calls before the recursive call
@@ -1452,6 +1725,15 @@ export function Chat() {
             if (e instanceof SyntaxError) continue;
             throw e;
           }
+        }
+
+        if (shouldFinalizeAfterUserQuestion) {
+          try {
+            await reader.cancel();
+          } catch {
+            // Ignore cancellation errors
+          }
+          break;
         }
 
         if (done) break;
@@ -1987,6 +2269,7 @@ export function Chat() {
             <ChatInput
               onSend={handleSend}
               isLoading={isLoading}
+              pendingAskQuestion={pendingAskQuestion}
               onStop={handleStop}
               webSearchEnabled={settings.webSearchEnabled}
               onToggleWebSearch={handleToggleWebSearch}

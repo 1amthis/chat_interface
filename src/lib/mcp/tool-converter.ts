@@ -64,6 +64,10 @@ export function parseToolName(fullName: string): {
     return { source: 'rag_search', name: fullName };
   }
 
+  if (fullName === 'ask_question') {
+    return { source: 'ask_question', name: fullName };
+  }
+
   if (fullName === 'create_artifact' || fullName === 'update_artifact' || fullName === 'read_artifact') {
     return { source: 'artifact', name: fullName };
   }

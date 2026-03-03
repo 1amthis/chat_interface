@@ -6,7 +6,7 @@ import { ChatMessage, StreamChunk, ToolCallInfo, ToolExecutionResult } from '../
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
 import { toGeminiTools, parseToolName } from '@/lib/mcp/tool-converter';
 import { toolCallLimitReached, generateGeminiToolCallId } from '../base';
-import { geminiWebSearchDeclaration, geminiGoogleDriveDeclaration, geminiMemorySearchDeclaration, geminiRAGSearchDeclaration, geminiCreateArtifactDeclaration, geminiUpdateArtifactDeclaration, geminiReadArtifactDeclaration } from '../tools/definitions';
+import { geminiWebSearchDeclaration, geminiGoogleDriveDeclaration, geminiMemorySearchDeclaration, geminiRAGSearchDeclaration, geminiAskQuestionDeclaration, geminiCreateArtifactDeclaration, geminiUpdateArtifactDeclaration, geminiReadArtifactDeclaration } from '../tools/definitions';
 import { isArtifactTool } from '../base';
 import { toGeminiParts } from './content';
 
@@ -163,6 +163,9 @@ export async function* streamGoogle(
   if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
     functionDeclarations.push(geminiRAGSearchDeclaration);
   }
+  if (!toolCallLimitReached('ask_question', toolExecutions)) {
+    functionDeclarations.push(geminiAskQuestionDeclaration);
+  }
   // Add MCP/builtin tools (with per-tool call limit to prevent loops)
   if (mcpTools && mcpTools.length > 0) {
     const filteredMcpTools = mcpTools.filter(t => !toolCallLimitReached(t.name, toolExecutions));
@@ -309,6 +312,15 @@ export async function* streamGoogle(
               originalName: rawName,
               params,
               source: 'rag_search',
+              thoughtSignature,
+            });
+          } else if (rawName === 'ask_question') {
+            toolCallsInCandidate.push({
+              id,
+              name: rawName,
+              originalName: rawName,
+              params,
+              source: 'ask_question',
               thoughtSignature,
             });
           } else if (isArtifactTool(rawName)) {

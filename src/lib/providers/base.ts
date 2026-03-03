@@ -57,6 +57,10 @@ export function toolCallLimitReached(
   const count = toolExecutions.filter(
     te => te.toolName === toolName || te.originalToolName === toolName
   ).length;
+  if (toolName === 'ask_question') {
+    // This tool should stop the turn and wait for user input.
+    return count >= 1;
+  }
   return count >= MAX_SAME_TOOL_CALLS;
 }
 
@@ -95,6 +99,19 @@ When you use facts from tool results, cite sources inline immediately after the 
 - Never invent citation keys. Only cite keys that were provided in tool results.
 - End answers that use external sources with a **Sources** section listing only cited keys.
 - If no source supports a claim, say that clearly instead of citing.`;
+}
+
+/**
+ * Build system prompt instructions for structured user clarifications.
+ */
+export function buildAskQuestionSystemPrompt(): string {
+  return `## Clarifying Questions
+
+When required details are missing, prefer the \`ask_question\` tool instead of guessing.
+
+- Use \`ask_question\` for concrete decision points (requirements, format choices, constraints).
+- Provide concise questions and 2-4 clear options when useful.
+- After calling \`ask_question\`, wait for the user's answer before continuing.`;
 }
 
 /**
@@ -240,11 +257,16 @@ export function buildEffectiveSystemPrompt(options: EffectiveSystemPromptOptions
     : basePrompt;
 
   const citationPrompt = buildCitationSystemPrompt(webSearchEnabled, ragEnabled);
+  const askQuestionPrompt = buildAskQuestionSystemPrompt();
   if (citationPrompt) {
     mergedPrompt = mergedPrompt
       ? `${mergedPrompt}\n\n${citationPrompt}`
       : citationPrompt;
   }
+
+  mergedPrompt = mergedPrompt
+    ? `${mergedPrompt}\n\n${askQuestionPrompt}`
+    : askQuestionPrompt;
 
   return mergedPrompt;
 }

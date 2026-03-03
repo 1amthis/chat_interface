@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import type { ChatMessage, ToolExecutionResult } from '@/lib/providers';
 import { toolCallLimitReached } from '@/lib/providers/base';
 import {
+  anthropicAskQuestionTool,
   anthropicCreateArtifactTool,
   anthropicGoogleDriveTool,
   anthropicMemorySearchTool,
@@ -10,6 +11,7 @@ import {
   anthropicReadArtifactTool,
   anthropicUpdateArtifactTool,
   anthropicWebSearchTool,
+  geminiAskQuestionDeclaration,
   geminiCreateArtifactDeclaration,
   geminiGoogleDriveDeclaration,
   geminiMemorySearchDeclaration,
@@ -17,6 +19,7 @@ import {
   geminiReadArtifactDeclaration,
   geminiUpdateArtifactDeclaration,
   geminiWebSearchDeclaration,
+  toResponsesAPIAskQuestionTool,
   toResponsesAPICreateArtifactTool,
   toResponsesAPIGoogleDriveTool,
   toResponsesAPIMemorySearchTool,
@@ -70,6 +73,7 @@ interface ActiveTools {
   googleDrive: boolean;
   memorySearch: boolean;
   rag: boolean;
+  askQuestion: boolean;
   mcpTools: UnifiedTool[];
   artifacts: boolean;
 }
@@ -95,6 +99,7 @@ function getActiveTools(params: ProviderTokenCountParams): ActiveTools {
       !toolCallLimitReached('google_drive_search', toolExecutions),
     memorySearch: !!memorySearchEnabled && !toolCallLimitReached('memory_search', toolExecutions),
     rag: !!ragEnabled && !toolCallLimitReached('rag_search', toolExecutions),
+    askQuestion: !toolCallLimitReached('ask_question', toolExecutions),
     mcpTools: (mcpTools || []).filter((t) => !toolCallLimitReached(t.name, toolExecutions)),
     artifacts: artifactsEnabled !== false,
   };
@@ -180,6 +185,7 @@ function buildOpenAIResponsesTools(activeTools: ActiveTools): Record<string, unk
   if (activeTools.googleDrive) tools.push(toResponsesAPIGoogleDriveTool());
   if (activeTools.memorySearch) tools.push(toResponsesAPIMemorySearchTool());
   if (activeTools.rag) tools.push(toResponsesAPIRAGSearchTool());
+  if (activeTools.askQuestion) tools.push(toResponsesAPIAskQuestionTool());
 
   if (activeTools.mcpTools.length > 0) {
     for (const tool of activeTools.mcpTools) {
@@ -292,8 +298,9 @@ async function countAnthropicTokens(params: ProviderTokenCountParams): Promise<n
   const activeTools = getActiveTools(params);
   const anthropicMessages = buildAnthropicMessages(params.messages);
 
-  if (params.toolExecutions && params.toolExecutions.length > 0) {
-    const thinkingFromToolTurn = params.toolExecutions.find(
+  const toolExecutions = params.toolExecutions;
+  if (toolExecutions && toolExecutions.length > 0) {
+    const thinkingFromToolTurn = toolExecutions.find(
       (te) => typeof te.anthropicThinkingSignature === 'string' && typeof te.anthropicThinking === 'string'
     );
     const replayThinkingBlockForToolTurn =
@@ -305,7 +312,7 @@ async function countAnthropicTokens(params: ProviderTokenCountParams): Promise<n
           } satisfies Anthropic.ThinkingBlockParam)
         : undefined;
 
-    const toolUseBlocks: Anthropic.ToolUseBlockParam[] = params.toolExecutions.map((te) => ({
+    const toolUseBlocks: Anthropic.ToolUseBlockParam[] = toolExecutions.map((te) => ({
       type: 'tool_use' as const,
       id: te.toolCallId,
       name: te.originalToolName || te.toolName,
@@ -317,13 +324,13 @@ async function countAnthropicTokens(params: ProviderTokenCountParams): Promise<n
       content: replayThinkingBlockForToolTurn ? [replayThinkingBlockForToolTurn, ...toolUseBlocks] : toolUseBlocks,
     });
 
-    const toolResultBlocks: Anthropic.ToolResultBlockParam[] = params.toolExecutions.map((te, index) => ({
+    const toolResultBlocks: Anthropic.ToolResultBlockParam[] = toolExecutions.map((te, index) => ({
       type: 'tool_result' as const,
       tool_use_id: te.toolCallId,
       content: te.result,
       is_error: te.isError,
       cache_control:
-        index === params.toolExecutions.length - 1
+        index === toolExecutions.length - 1
           ? ANTHROPIC_EPHEMERAL_CACHE_CONTROL
           : undefined,
     }));
@@ -345,6 +352,7 @@ async function countAnthropicTokens(params: ProviderTokenCountParams): Promise<n
   if (activeTools.googleDrive) tools.push(anthropicGoogleDriveTool);
   if (activeTools.memorySearch) tools.push(anthropicMemorySearchTool);
   if (activeTools.rag) tools.push(anthropicRAGSearchTool);
+  if (activeTools.askQuestion) tools.push(anthropicAskQuestionTool);
   if (activeTools.mcpTools.length > 0) tools.push(...toAnthropicTools(activeTools.mcpTools));
   if (activeTools.artifacts) {
     tools.push(anthropicCreateArtifactTool, anthropicUpdateArtifactTool, anthropicReadArtifactTool);
@@ -426,6 +434,7 @@ async function countGoogleTokens(params: ProviderTokenCountParams): Promise<numb
   if (activeTools.googleDrive) functionDeclarations.push(geminiGoogleDriveDeclaration);
   if (activeTools.memorySearch) functionDeclarations.push(geminiMemorySearchDeclaration);
   if (activeTools.rag) functionDeclarations.push(geminiRAGSearchDeclaration);
+  if (activeTools.askQuestion) functionDeclarations.push(geminiAskQuestionDeclaration);
   if (activeTools.mcpTools.length > 0) {
     functionDeclarations.push(...toGeminiTools(activeTools.mcpTools).functionDeclarations);
   }

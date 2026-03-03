@@ -7,7 +7,7 @@ import { ChatMessage, StreamChunk, ToolExecutionResult } from '../types';
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse } from '@/types';
 import { toolCallLimitReached } from '../base';
 import { toAnthropicTools, parseToolName } from '@/lib/mcp/tool-converter';
-import { anthropicWebSearchTool, anthropicGoogleDriveTool, anthropicMemorySearchTool, anthropicRAGSearchTool, anthropicCreateArtifactTool, anthropicUpdateArtifactTool, anthropicReadArtifactTool } from '../tools/definitions';
+import { anthropicWebSearchTool, anthropicGoogleDriveTool, anthropicMemorySearchTool, anthropicRAGSearchTool, anthropicAskQuestionTool, anthropicCreateArtifactTool, anthropicUpdateArtifactTool, anthropicReadArtifactTool } from '../tools/definitions';
 import { isArtifactTool } from '../base';
 import { toAnthropicContent } from './content';
 
@@ -185,6 +185,9 @@ export async function* streamAnthropic(
   if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
     tools.push(anthropicRAGSearchTool);
   }
+  if (!toolCallLimitReached('ask_question', toolExecutions)) {
+    tools.push(anthropicAskQuestionTool);
+  }
   // Add MCP/builtin tools (with per-tool call limit to prevent loops)
   if (mcpTools && mcpTools.length > 0) {
     const filteredMcpTools = mcpTools.filter(t => !toolCallLimitReached(t.name, toolExecutions));
@@ -347,6 +350,16 @@ export async function* streamAnthropic(
             originalToolName: currentToolName,
             toolParams: { query: args.query },
             toolSource: 'rag_search',
+            toolThinkingSignature: currentThinkingSignature || undefined,
+          };
+        } else if (currentToolName === 'ask_question') {
+          yield {
+            type: 'tool_call',
+            toolCallId: currentToolId,
+            toolName: currentToolName,
+            originalToolName: currentToolName,
+            toolParams: args,
+            toolSource: 'ask_question',
             toolThinkingSignature: currentThinkingSignature || undefined,
           };
         } else if (isArtifactTool(currentToolName)) {

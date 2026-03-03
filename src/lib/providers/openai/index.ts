@@ -7,7 +7,7 @@ import { ChatMessage, StreamChunk, ToolCallInfo, ToolExecutionResult } from '../
 import { UnifiedTool, WebSearchResponse, GoogleDriveSearchResponse, ToolSource } from '@/types';
 import { toolCallLimitReached } from '../base';
 import { toOpenAITools, parseToolName } from '@/lib/mcp/tool-converter';
-import { openAIWebSearchTool, openAIGoogleDriveTool, openAIMemorySearchTool, openAIRAGSearchTool, openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool, toResponsesAPIWebSearchTool, toResponsesAPIGoogleDriveTool, toResponsesAPIMemorySearchTool, toResponsesAPIRAGSearchTool, toResponsesAPICreateArtifactTool, toResponsesAPIUpdateArtifactTool, toResponsesAPIReadArtifactTool } from '../tools/definitions';
+import { openAIWebSearchTool, openAIGoogleDriveTool, openAIMemorySearchTool, openAIRAGSearchTool, openAIAskQuestionTool, openAICreateArtifactTool, openAIUpdateArtifactTool, openAIReadArtifactTool, toResponsesAPIWebSearchTool, toResponsesAPIGoogleDriveTool, toResponsesAPIMemorySearchTool, toResponsesAPIRAGSearchTool, toResponsesAPIAskQuestionTool, toResponsesAPICreateArtifactTool, toResponsesAPIUpdateArtifactTool, toResponsesAPIReadArtifactTool } from '../tools/definitions';
 import { isArtifactTool } from '../base';
 import { toOpenAIContent } from './content';
 
@@ -122,6 +122,9 @@ export async function* streamOpenAI(
   }
   if (ragEnabled && !toolCallLimitReached('rag_search', toolExecutions)) {
     tools.push(openAIRAGSearchTool);
+  }
+  if (!toolCallLimitReached('ask_question', toolExecutions)) {
+    tools.push(openAIAskQuestionTool);
   }
   // Add MCP/builtin tools (with per-tool call limit to prevent loops)
   if (mcpTools && mcpTools.length > 0) {
@@ -240,6 +243,14 @@ export async function* streamOpenAI(
               params: { query: args.query },
               source: 'rag_search',
             });
+          } else if (tc.name === 'ask_question') {
+            parsedToolCalls.push({
+              id: tc.id,
+              name: tc.name,
+              originalName: tc.name,
+              params: args,
+              source: 'ask_question',
+            });
           } else if (isArtifactTool(tc.name)) {
             parsedToolCalls.push({
               id: tc.id,
@@ -306,6 +317,7 @@ function toResponsesAPITools(
   memorySearchEnabled?: boolean,
   mcpTools?: UnifiedTool[],
   ragEnabled?: boolean,
+  askQuestionEnabled?: boolean,
   artifactsEnabled?: boolean
 ): Record<string, unknown>[] {
   const tools: Record<string, unknown>[] = [];
@@ -328,6 +340,9 @@ function toResponsesAPITools(
   // Add RAG search as a function tool
   if (ragEnabled) {
     tools.push(toResponsesAPIRAGSearchTool());
+  }
+  if (askQuestionEnabled) {
+    tools.push(toResponsesAPIAskQuestionTool());
   }
 
   // Add MCP/builtin tools
@@ -523,6 +538,7 @@ export async function* streamOpenAIResponses(
     memorySearchEnabled && !toolCallLimitReached('memory_search', toolExecutions),
     mcpTools?.filter(t => !toolCallLimitReached(t.name, toolExecutions)),
     ragEnabled && !toolCallLimitReached('rag_search', toolExecutions),
+    !toolCallLimitReached('ask_question', toolExecutions),
     artifactsEnabled
   );
   if (tools.length > 0) {
@@ -666,6 +682,8 @@ export async function* streamOpenAIResponses(
             toolSource = 'memory_search';
           } else if (fc.name === 'rag_search') {
             toolSource = 'rag_search';
+          } else if (fc.name === 'ask_question') {
+            toolSource = 'ask_question';
           } else if (isArtifactTool(fc.name)) {
             toolSource = 'artifact';
           }

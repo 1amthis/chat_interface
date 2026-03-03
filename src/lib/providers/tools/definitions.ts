@@ -6,6 +6,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import {
+  ASK_QUESTION_SCHEMA,
   ARTIFACT_TOOL_NAMES,
   CREATE_ARTIFACT_SCHEMA,
   GOOGLE_DRIVE_SCHEMA,
@@ -17,6 +18,7 @@ import {
 } from './schemas';
 
 export {
+  ASK_QUESTION_SCHEMA,
   ARTIFACT_TOOL_NAMES,
   CREATE_ARTIFACT_SCHEMA,
   GOOGLE_DRIVE_SCHEMA,
@@ -65,6 +67,15 @@ export const openAIRAGSearchTool: OpenAI.ChatCompletionTool = {
   },
 };
 
+export const openAIAskQuestionTool: OpenAI.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: ASK_QUESTION_SCHEMA.name,
+    description: ASK_QUESTION_SCHEMA.description,
+    parameters: ASK_QUESTION_SCHEMA.parameters,
+  },
+};
+
 // Anthropic format tools
 export const anthropicWebSearchTool: Anthropic.Tool = {
   name: WEB_SEARCH_SCHEMA.name,
@@ -106,6 +117,16 @@ export const anthropicRAGSearchTool: Anthropic.Tool = {
   },
 };
 
+export const anthropicAskQuestionTool: Anthropic.Tool = {
+  name: ASK_QUESTION_SCHEMA.name,
+  description: ASK_QUESTION_SCHEMA.description,
+  input_schema: {
+    type: 'object' as const,
+    properties: ASK_QUESTION_SCHEMA.parameters.properties,
+    required: ASK_QUESTION_SCHEMA.parameters.required,
+  },
+};
+
 // Gemini format tools
 export const geminiWebSearchDeclaration = {
   name: WEB_SEARCH_SCHEMA.name,
@@ -129,6 +150,12 @@ export const geminiRAGSearchDeclaration = {
   name: RAG_SEARCH_SCHEMA.name,
   description: RAG_SEARCH_SCHEMA.description,
   parameters: RAG_SEARCH_SCHEMA.parameters,
+};
+
+export const geminiAskQuestionDeclaration = {
+  name: ASK_QUESTION_SCHEMA.name,
+  description: ASK_QUESTION_SCHEMA.description,
+  parameters: ASK_QUESTION_SCHEMA.parameters,
 };
 
 // OpenAI format artifact tools
@@ -290,6 +317,18 @@ export function toResponsesAPIRAGSearchTool() {
     description: RAG_SEARCH_SCHEMA.description,
     parameters: {
       ...RAG_SEARCH_SCHEMA.parameters,
+      additionalProperties: false,
+    },
+  };
+}
+
+export function toResponsesAPIAskQuestionTool() {
+  return {
+    type: 'function',
+    name: ASK_QUESTION_SCHEMA.name,
+    description: ASK_QUESTION_SCHEMA.description,
+    parameters: {
+      ...ASK_QUESTION_SCHEMA.parameters,
       additionalProperties: false,
     },
   };

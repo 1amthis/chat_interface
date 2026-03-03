@@ -23,6 +23,7 @@ export {
   buildEffectiveSystemPrompt,
   isArtifactTool,
   // Tool definitions (for advanced use cases)
+  ASK_QUESTION_SCHEMA,
   WEB_SEARCH_SCHEMA,
   GOOGLE_DRIVE_SCHEMA,
   ARTIFACT_TOOL_NAMES,

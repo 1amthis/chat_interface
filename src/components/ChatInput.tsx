@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useState, useRef, useEffect, useMemo, useCallback, KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { Attachment, Provider } from '@/types';
+import { Attachment, Provider, AskQuestionToolResult, AskQuestionPrompt } from '@/types';
 import { generateId } from '@/lib/storage';
 import {
   formatFileSize,
@@ -20,6 +20,7 @@ const IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml';
 interface ChatInputProps {
   onSend: (message: string, attachments: Attachment[]) => void;
   isLoading: boolean;
+  pendingAskQuestion?: AskQuestionToolResult | null;
   onStop?: () => void;
   webSearchEnabled?: boolean;
   onToggleWebSearch?: () => void;
@@ -45,9 +46,148 @@ interface ChatInputProps {
   onToggleThinking?: () => void;
 }
 
+interface AskQuestionQuickReplyProps {
+  questionSet: AskQuestionToolResult;
+  isLoading: boolean;
+  onSubmit: (answer: string) => void;
+}
+
+function AskQuestionQuickReply({ questionSet, isLoading, onSubmit }: AskQuestionQuickReplyProps) {
+  const [askQuestionSelections, setAskQuestionSelections] = useState<Record<number, number[]>>({});
+  const [askQuestionDetails, setAskQuestionDetails] = useState('');
+
+  const toggleAskQuestionOption = (questionIndex: number, optionIndex: number, multiSelect: boolean) => {
+    setAskQuestionSelections((prev) => {
+      const current = prev[questionIndex] || [];
+      let next: number[];
+
+      if (multiSelect) {
+        next = current.includes(optionIndex)
+          ? current.filter((index) => index !== optionIndex)
+          : [...current, optionIndex];
+      } else {
+        next = current.includes(optionIndex) ? [] : [optionIndex];
+      }
+
+      return {
+        ...prev,
+        [questionIndex]: next,
+      };
+    });
+  };
+
+  const formatAskQuestionAnswer = (questions: AskQuestionPrompt[]): string => {
+    const lines: string[] = [];
+
+    questions.forEach((question, questionIndex) => {
+      const selectedOptionIndexes = askQuestionSelections[questionIndex] || [];
+      const selectedLabels = selectedOptionIndexes
+        .map((optionIndex) => question.options[optionIndex]?.label)
+        .filter((label): label is string => typeof label === 'string' && label.length > 0);
+
+      if (selectedLabels.length === 0) return;
+
+      const heading = question.header || `Question ${questionIndex + 1}`;
+      lines.push(`${heading}: ${selectedLabels.join(', ')}`);
+    });
+
+    if (askQuestionDetails.trim()) {
+      lines.push(`Additional details: ${askQuestionDetails.trim()}`);
+    }
+
+    return lines.join('\n');
+  };
+
+  const handleAskQuestionSubmit = () => {
+    const answer = formatAskQuestionAnswer(questionSet.questions);
+    if (!answer.trim()) {
+      notify('Select at least one option or provide additional details.', 'warning');
+      return;
+    }
+    onSubmit(answer);
+  };
+
+  return (
+    <div className="px-4 py-3 border-b border-[var(--border-color)] bg-blue-50/60 dark:bg-blue-900/15">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+          Answer Clarifying Questions
+        </p>
+        <span className="text-xs text-blue-700 dark:text-blue-400">
+          {questionSet.questions.length} question{questionSet.questions.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        {questionSet.questions.map((question, questionIndex) => {
+          const selectedOptionIndexes = askQuestionSelections[questionIndex] || [];
+          return (
+            <div key={questionIndex} className="rounded-lg border border-blue-200/80 dark:border-blue-800/60 bg-[var(--background)]/80 p-2.5">
+              <div className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-0.5">
+                {question.header || `Question ${questionIndex + 1}`}
+              </div>
+              <p className="text-sm mb-2">{question.question}</p>
+
+              {question.options.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {question.options.map((option, optionIndex) => {
+                    const selected = selectedOptionIndexes.includes(optionIndex);
+                    return (
+                      <button
+                        key={`${questionIndex}-${optionIndex}`}
+                        type="button"
+                        onClick={() => toggleAskQuestionOption(questionIndex, optionIndex, !!question.multiSelect)}
+                        disabled={isLoading}
+                        className={`text-xs px-2.5 py-1.5 rounded-full border transition-colors disabled:opacity-50 ${
+                          selected
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-[var(--background)] text-[var(--foreground)] border-[var(--border-color)] hover:border-blue-400'
+                        }`}
+                        title={option.description}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {question.multiSelect && (
+                <p className="text-[11px] text-gray-500 mt-1">Multiple selections allowed</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2">
+        <textarea
+          value={askQuestionDetails}
+          onChange={(event) => setAskQuestionDetails(event.target.value)}
+          rows={2}
+          disabled={isLoading}
+          placeholder="Optional details..."
+          className="w-full resize-none rounded-lg border border-[var(--border-color)] bg-[var(--background)] px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/40"
+        />
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={handleAskQuestionSubmit}
+            disabled={isLoading}
+            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
+          >
+            Send selected answer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ChatInput({
   onSend,
   isLoading,
+  pendingAskQuestion,
   onStop,
   webSearchEnabled,
   onToggleWebSearch,
@@ -160,6 +300,12 @@ export function ChatInput({
     mcpEnabled,
   ]);
   const artifactsToolsEnabled = artifactsEnabled !== false;
+  const handleAskQuestionSubmit = (answer: string) => {
+    onSend(answer, []);
+    setInput('');
+    setAttachments([]);
+    setShowToolsMenu(false);
+  };
 
   const handleSubmit = () => {
     if ((input.trim() || attachments.length > 0) && !isLoading) {
@@ -375,6 +521,15 @@ export function ChatInput({
                   Dismiss
                 </button>
               </div>
+            )}
+
+            {pendingAskQuestion && pendingAskQuestion.questions.length > 0 && (
+              <AskQuestionQuickReply
+                key={JSON.stringify(pendingAskQuestion.questions)}
+                questionSet={pendingAskQuestion}
+                isLoading={isLoading}
+                onSubmit={handleAskQuestionSubmit}
+              />
             )}
 
             {/* Textarea */}

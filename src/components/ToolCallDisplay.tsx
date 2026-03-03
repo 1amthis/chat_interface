@@ -325,11 +325,38 @@ interface RAGSearchResponseData {
   results: RAGSearchResult[];
 }
 
+interface AskQuestionOptionData {
+  label: string;
+  description?: string;
+}
+
+interface AskQuestionPromptData {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options?: AskQuestionOptionData[];
+}
+
+interface AskQuestionResponseData {
+  __ask_question__: true;
+  status: 'awaiting_user_input';
+  questions: AskQuestionPromptData[];
+}
+
 function tryParseRAGSearchResponse(result: unknown): RAGSearchResponseData | null {
   if (!result || typeof result !== 'object') return null;
   const obj = result as Record<string, unknown>;
   if (obj.__rag_search__ === true && typeof obj.query === 'string' && Array.isArray(obj.results)) {
     return obj as unknown as RAGSearchResponseData;
+  }
+  return null;
+}
+
+function tryParseAskQuestionResponse(result: unknown): AskQuestionResponseData | null {
+  if (!result || typeof result !== 'object') return null;
+  const obj = result as Record<string, unknown>;
+  if (obj.__ask_question__ === true && obj.status === 'awaiting_user_input' && Array.isArray(obj.questions)) {
+    return obj as unknown as AskQuestionResponseData;
   }
   return null;
 }
@@ -384,6 +411,39 @@ function RAGSearchResultsList({ response }: { response: RAGSearchResponseData })
   );
 }
 
+function AskQuestionResultsList({ response }: { response: AskQuestionResponseData }) {
+  return (
+    <div className="tool-call-results">
+      <div className="tool-results-header">
+        Waiting for user input ({response.questions.length} question{response.questions.length !== 1 ? 's' : ''})
+      </div>
+      <div className="tool-results-list">
+        {response.questions.map((q, questionIndex) => (
+          <div key={questionIndex} className="tool-result-item tool-result-item-static">
+            <div className="tool-result-header-row">
+              <span className="tool-result-type-icon">❓</span>
+              <span className="tool-result-title tool-result-title-default">
+                {q.header || `Question ${questionIndex + 1}`}
+              </span>
+            </div>
+            <div className="tool-result-meta">{q.question}</div>
+            {Array.isArray(q.options) && q.options.length > 0 && (
+              <div className="tool-result-meta mt-1">
+                {q.options.map((option, optionIndex) => (
+                  <div key={optionIndex}>
+                    {String.fromCharCode(65 + optionIndex)}) {option.label}
+                    {option.description ? ` — ${option.description}` : ''}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface ToolCallDisplayProps {
   toolCalls: ToolCall[];
   inline?: boolean;  // For inline display within message flow
@@ -408,6 +468,7 @@ function getStatusIcon(status: ToolCall['status']): string {
 function getToolIcon(name: string): string {
   if (name === 'web_search') return '🔍';
   if (name === 'google_drive_search') return '📁';
+  if (name === 'ask_question') return '❓';
   if (name === 'create_artifact') return '🎨';
   if (name === 'update_artifact') return '✏️';
   if (name === 'read_artifact') return '📄';
@@ -419,6 +480,8 @@ function getToolIcon(name: string): string {
 }
 
 function getToolDisplayName(name: string): string {
+  if (name === 'ask_question') return 'Ask Question';
+
   // Artifact tool display names
   if (name === 'create_artifact') return 'Create Artifact';
   if (name === 'update_artifact') return 'Update Artifact';
@@ -527,6 +590,10 @@ function SingleToolCall({ toolCall, isExpanded, onToggle, inline }: SingleToolCa
                 if (name === 'rag_search') {
                   const ragSearch = tryParseRAGSearchResponse(result);
                   if (ragSearch) return <RAGSearchResultsList response={ragSearch} />;
+                }
+                if (name === 'ask_question') {
+                  const askQuestion = tryParseAskQuestionResponse(result);
+                  if (askQuestion) return <AskQuestionResultsList response={askQuestion} />;
                 }
                 const formatted = formatResult();
                 const sqlResult = tryParseSqlResult(formatted);
