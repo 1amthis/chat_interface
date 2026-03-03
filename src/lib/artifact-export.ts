@@ -1,16 +1,11 @@
 import { Artifact, ArtifactOutputFormat } from '@/types';
+import { parseDocumentContent, parseDocumentBlocks } from './document-parser';
+import type { FlatBlock } from './document-parser';
 
 export interface ArtifactExportOption {
   format: ArtifactOutputFormat;
   label: string;
 }
-
-type RichBlock =
-  | { type: 'heading'; text: string; level: number }
-  | { type: 'paragraph'; text: string }
-  | { type: 'list'; items: string[]; ordered: boolean }
-  | { type: 'table'; headers: string[]; rows: string[][] }
-  | { type: 'code'; text: string; language?: string };
 
 export interface SlideContent {
   title: string;
@@ -18,9 +13,7 @@ export interface SlideContent {
   bullets: string[];
 }
 
-const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 const SOURCE_EXTENSIONS: Record<Artifact['type'], string> = {
   code: 'txt',
@@ -208,14 +201,6 @@ function normalizeForTextExport(artifact: Artifact): string {
   return normalizeLineEndings(artifact.content).trim();
 }
 
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
 
 async function generatePdfBlob(content: string, title?: string): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
@@ -340,228 +325,395 @@ async function generatePdfBlob(content: string, title?: string): Promise<Blob> {
   return doc.output('blob');
 }
 
-function renderDocxTextRun(text: string, monospace = false): string {
-  const segments = normalizeLineEndings(text).split('\n');
-  const runProps = monospace
-    ? '<w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/><w:sz w:val="20"/></w:rPr>'
-    : '';
+// ===== DOCX generation helpers (using docx package) =====
 
-  let xml = `<w:r>${runProps}`;
-  segments.forEach((segment, index) => {
-    if (index > 0) {
-      xml += '<w:br/>';
-    }
-    xml += `<w:t xml:space="preserve">${escapeXml(segment || ' ')}</w:t>`;
-  });
-  xml += '</w:r>';
-  return xml;
+interface DocxExportTheme {
+  primaryColor: string;
+  bodyColor: string;
+  accentColor: string;
+  headingFont: string;
+  bodyFont: string;
+  fontSize: number;
+  lineSpacing: number;
 }
 
-function renderDocxParagraph(
-  text: string,
-  options?: { styleId?: string; indentTwips?: number; monospace?: boolean }
-): string {
-  const pPrParts: string[] = [];
-  if (options?.styleId) {
-    pPrParts.push(`<w:pStyle w:val="${options.styleId}"/>`);
-  }
-  if (options?.indentTwips) {
-    pPrParts.push(`<w:ind w:left="${options.indentTwips}"/>`);
-  }
-
-  const pPr = pPrParts.length > 0 ? `<w:pPr>${pPrParts.join('')}</w:pPr>` : '';
-  return `<w:p>${pPr}${renderDocxTextRun(text, options?.monospace)}</w:p>`;
-}
-
-function renderDocxTable(headers: string[], rows: string[][]): string {
-  const allRows = headers.length > 0 ? [headers, ...rows] : rows;
-  const columnCount = allRows.reduce((max, row) => Math.max(max, row.length), 0);
-  const normalizedRows = allRows.map(row => {
-    const padded = [...row];
-    while (padded.length < columnCount) padded.push('');
-    return padded;
-  });
-
-  const columnWidth = columnCount > 0 ? Math.floor(9000 / columnCount) : 3000;
-  const grid = Array.from({ length: Math.max(columnCount, 1) })
-    .map(() => `<w:gridCol w:w="${columnWidth}"/>`)
-    .join('');
-
-  const tableRows = normalizedRows.map((row, rowIndex) => {
-    const cells = row.map((cell) => {
-      const cellParagraph = renderDocxParagraph(cell, {
-        styleId: rowIndex === 0 && headers.length > 0 ? 'TableHeader' : undefined,
-      });
-      return `<w:tc><w:tcPr><w:tcW w:w="${columnWidth}" w:type="dxa"/></w:tcPr>${cellParagraph}</w:tc>`;
-    }).join('');
-    return `<w:tr>${cells}</w:tr>`;
-  }).join('');
-
-  return `<w:tbl>
-    <w:tblPr>
-      <w:tblW w:w="0" w:type="auto"/>
-      <w:tblBorders>
-        <w:top w:val="single" w:sz="8" w:space="0" w:color="auto"/>
-        <w:left w:val="single" w:sz="8" w:space="0" w:color="auto"/>
-        <w:bottom w:val="single" w:sz="8" w:space="0" w:color="auto"/>
-        <w:right w:val="single" w:sz="8" w:space="0" w:color="auto"/>
-        <w:insideH w:val="single" w:sz="8" w:space="0" w:color="auto"/>
-        <w:insideV w:val="single" w:sz="8" w:space="0" w:color="auto"/>
-      </w:tblBorders>
-    </w:tblPr>
-    <w:tblGrid>${grid}</w:tblGrid>
-    ${tableRows}
-  </w:tbl>`;
+function resolveDocxTheme(theme?: import('@/types').DocumentTheme): DocxExportTheme {
+  const cleanHex = (c: string | undefined, fallback: string) => (c ? c.replace(/^#/, '') || fallback : fallback);
+  return {
+    primaryColor: cleanHex(theme?.primaryColor, '1A1A2E'),
+    bodyColor: cleanHex(theme?.bodyColor, '333333'),
+    accentColor: cleanHex(theme?.accentColor, '3B82F6'),
+    headingFont: theme?.headingFont ?? 'Arial',
+    bodyFont: theme?.bodyFont ?? 'Calibri',
+    fontSize: theme?.fontSize ?? 11,
+    lineSpacing: theme?.lineSpacing ?? 1.15,
+  };
 }
 
 async function generateDocxBlob(content: string, title: string): Promise<Blob> {
-  const JSZip = (await import('jszip')).default;
-  const zip = new JSZip();
-  const blocks = parseDocumentBlocks(content, title);
+  const docx = await import('docx');
+  const richDoc = parseDocumentContent(content, title);
+  const theme = resolveDocxTheme(richDoc.theme);
 
-  const bodyParts: string[] = [];
-  for (const block of blocks) {
-    if (block.type === 'heading') {
-      const styleId = block.level <= 1 ? 'Heading1' : block.level === 2 ? 'Heading2' : 'Heading3';
-      bodyParts.push(renderDocxParagraph(block.text, { styleId }));
-      continue;
+  type HeadingLevelValue = (typeof docx.HeadingLevel)[keyof typeof docx.HeadingLevel];
+  const HEADING_MAP: Record<number, HeadingLevelValue> = {
+    1: docx.HeadingLevel.HEADING_1,
+    2: docx.HeadingLevel.HEADING_2,
+    3: docx.HeadingLevel.HEADING_3,
+    4: docx.HeadingLevel.HEADING_4,
+    5: docx.HeadingLevel.HEADING_5,
+    6: docx.HeadingLevel.HEADING_6,
+  };
+
+  type ParagraphChild = InstanceType<typeof docx.TextRun> | InstanceType<typeof docx.ExternalHyperlink>;
+
+  /** Convert DocRichText to docx TextRun/Hyperlink children */
+  function buildTextRuns(text: import('@/types').DocRichText): ParagraphChild[] {
+    if (typeof text === 'string') {
+      return [new docx.TextRun({ text, font: theme.bodyFont, size: theme.fontSize * 2, color: theme.bodyColor })];
+    }
+    return text.map((run) => {
+      const runOpts: ConstructorParameters<typeof docx.TextRun>[0] = {
+        text: run.text,
+        bold: run.bold,
+        italics: run.italic,
+        underline: run.underline ? { type: docx.UnderlineType.SINGLE } : undefined,
+        strike: run.strikethrough,
+        superScript: run.superscript,
+        subScript: run.subscript,
+        color: run.color?.replace(/^#/, '') || undefined,
+        size: (run.fontSize ?? theme.fontSize) * 2,
+        font: run.fontFace ?? (run.code ? 'Courier New' : theme.bodyFont),
+        shading: run.code ? { type: docx.ShadingType.CLEAR, fill: 'F3F4F6' } : undefined,
+      };
+      if (run.hyperlink) {
+        return new docx.ExternalHyperlink({
+          link: run.hyperlink,
+          children: [new docx.TextRun({ ...runOpts, style: 'Hyperlink' })],
+        });
+      }
+      return new docx.TextRun(runOpts);
+    });
+  }
+
+  /** Build list paragraphs (bullet or numbered) */
+  function buildListItems(
+    items: (string | import('@/types').DocListItem)[],
+    ordered: boolean,
+    level = 0,
+  ): InstanceType<typeof docx.Paragraph>[] {
+    const results: InstanceType<typeof docx.Paragraph>[] = [];
+    for (const item of items) {
+      const text = typeof item === 'string' ? item : item.text;
+      results.push(new docx.Paragraph({
+        children: buildTextRuns(text),
+        numbering: { reference: ordered ? 'ordered-list' : 'bullet-list', level },
+        spacing: { after: 40 },
+      }));
+      if (typeof item !== 'string' && item.children && item.children.length > 0) {
+        results.push(...buildListItems(item.children, ordered, level + 1));
+      }
+    }
+    return results;
+  }
+
+  /** Build a docx Table from DocTable */
+  function buildTable(table: import('@/types').DocTable): InstanceType<typeof docx.Table> {
+    const headerFill = table.headerFill?.replace(/^#/, '') || theme.accentColor;
+    const headerColor = table.headerColor?.replace(/^#/, '') || 'FFFFFF';
+    const borderColor = table.borderColor?.replace(/^#/, '') || 'CCCCCC';
+    const borderOpts = { style: docx.BorderStyle.SINGLE, size: 1, color: borderColor };
+
+    const allRows: InstanceType<typeof docx.TableRow>[] = [];
+
+    if (table.headers && table.headers.length > 0) {
+      allRows.push(new docx.TableRow({
+        tableHeader: true,
+        children: table.headers.map((h) => {
+          const text = typeof h === 'string' ? h : h.text;
+          const cellFill = typeof h !== 'string' && h.fill ? h.fill.replace(/^#/, '') : headerFill;
+          const cellColor = typeof h !== 'string' && h.color ? h.color.replace(/^#/, '') : headerColor;
+          return new docx.TableCell({
+            shading: { type: docx.ShadingType.CLEAR, fill: cellFill },
+            children: [new docx.Paragraph({
+              children: [new docx.TextRun({ text, bold: true, color: cellColor, font: theme.bodyFont, size: theme.fontSize * 2 })],
+              alignment: docx.AlignmentType.CENTER,
+            })],
+          });
+        }),
+      }));
     }
 
-    if (block.type === 'paragraph') {
-      bodyParts.push(renderDocxParagraph(block.text));
-      continue;
+    for (const row of table.rows) {
+      allRows.push(new docx.TableRow({
+        children: row.map((c) => {
+          const isObj = typeof c === 'object' && c !== null;
+          const text = isObj ? c.text : c;
+          return new docx.TableCell({
+            shading: isObj && c.fill ? { type: docx.ShadingType.CLEAR, fill: c.fill.replace(/^#/, '') } : undefined,
+            children: [new docx.Paragraph({
+              children: [new docx.TextRun({
+                text,
+                bold: isObj ? c.bold : undefined,
+                color: (isObj && c.color ? c.color.replace(/^#/, '') : theme.bodyColor),
+                font: theme.bodyFont,
+                size: theme.fontSize * 2,
+              })],
+              alignment: isObj && c.align
+                ? (c.align === 'center' ? docx.AlignmentType.CENTER : c.align === 'right' ? docx.AlignmentType.END : docx.AlignmentType.START)
+                : undefined,
+            })],
+          });
+        }),
+      }));
     }
 
-    if (block.type === 'list') {
-      block.items.forEach((item, index) => {
-        const prefix = block.ordered ? `${index + 1}. ` : '- ';
-        bodyParts.push(renderDocxParagraph(`${prefix}${item}`, { indentTwips: 360 }));
-      });
-      continue;
+    return new docx.Table({
+      rows: allRows,
+      width: { size: 100, type: docx.WidthType.PERCENTAGE },
+      borders: {
+        top: borderOpts,
+        bottom: borderOpts,
+        left: borderOpts,
+        right: borderOpts,
+        insideHorizontal: borderOpts,
+        insideVertical: borderOpts,
+      },
+    });
+  }
+
+  /** Convert DocumentBlock[] to docx children (Paragraph | Table) */
+  function buildChildren(blocks: import('@/types').DocumentBlock[]): (InstanceType<typeof docx.Paragraph> | InstanceType<typeof docx.Table>)[] {
+    const children: (InstanceType<typeof docx.Paragraph> | InstanceType<typeof docx.Table>)[] = [];
+
+    for (const block of blocks) {
+      switch (block.type) {
+        case 'heading': {
+          children.push(new docx.Paragraph({
+            heading: HEADING_MAP[block.level] || docx.HeadingLevel.HEADING_1,
+            children: buildTextRuns(block.text),
+            spacing: { before: 240, after: 120 },
+          }));
+          break;
+        }
+        case 'paragraph': {
+          children.push(new docx.Paragraph({
+            children: buildTextRuns(block.text),
+            spacing: { after: 120, line: Math.round(theme.lineSpacing * 240) },
+          }));
+          break;
+        }
+        case 'list': {
+          children.push(...buildListItems(block.items, block.ordered));
+          break;
+        }
+        case 'table': {
+          if (block.table.caption) {
+            children.push(new docx.Paragraph({
+              children: [new docx.TextRun({ text: block.table.caption, italics: true, font: theme.bodyFont, size: (theme.fontSize - 1) * 2, color: theme.bodyColor })],
+              spacing: { after: 60 },
+            }));
+          }
+          children.push(buildTable(block.table));
+          children.push(new docx.Paragraph({ spacing: { after: 120 } }));
+          break;
+        }
+        case 'code': {
+          const lines = block.code.code.split('\n');
+          if (block.code.caption) {
+            children.push(new docx.Paragraph({
+              children: [new docx.TextRun({ text: block.code.caption, bold: true, font: theme.bodyFont, size: (theme.fontSize - 1) * 2 })],
+              spacing: { after: 40 },
+            }));
+          }
+          for (const line of lines) {
+            children.push(new docx.Paragraph({
+              children: [new docx.TextRun({ text: line || ' ', font: 'Courier New', size: 20, color: theme.bodyColor })],
+              shading: { type: docx.ShadingType.CLEAR, fill: 'F3F4F6' },
+              spacing: { before: 0, after: 0, line: 280 },
+              indent: { left: 240, right: 240 },
+            }));
+          }
+          children.push(new docx.Paragraph({ spacing: { after: 120 } }));
+          break;
+        }
+        case 'blockquote': {
+          children.push(new docx.Paragraph({
+            children: buildTextRuns(block.text),
+            indent: { left: 720 },
+            border: { left: { style: docx.BorderStyle.SINGLE, size: 6, color: theme.accentColor, space: 8 } },
+            spacing: { before: 120, after: 120, line: Math.round(theme.lineSpacing * 240) },
+          }));
+          break;
+        }
+        case 'callout': {
+          const label = (block.callout.type ?? 'note').toUpperCase();
+          children.push(new docx.Paragraph({
+            children: [
+              new docx.TextRun({ text: `${label}: `, bold: true, font: theme.bodyFont, size: theme.fontSize * 2, color: theme.accentColor }),
+              ...buildTextRuns(block.callout.text),
+            ],
+            shading: { type: docx.ShadingType.CLEAR, fill: 'EFF6FF' },
+            border: { left: { style: docx.BorderStyle.SINGLE, size: 6, color: theme.accentColor, space: 8 } },
+            indent: { left: 240, right: 240 },
+            spacing: { before: 120, after: 120 },
+          }));
+          break;
+        }
+        case 'image': {
+          // Images can't be added without binary data in docx package; add placeholder text
+          const caption = block.image.caption || block.image.alt || 'Image';
+          children.push(new docx.Paragraph({
+            children: [new docx.TextRun({ text: `[${caption}]`, italics: true, color: '999999', font: theme.bodyFont, size: theme.fontSize * 2 })],
+            alignment: docx.AlignmentType.CENTER,
+            spacing: { before: 120, after: 120 },
+          }));
+          break;
+        }
+        case 'break': {
+          if (block.break.type === 'page-break') {
+            children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
+          } else {
+            children.push(new docx.Paragraph({
+              thematicBreak: true,
+              spacing: { before: 200, after: 200 },
+            }));
+          }
+          break;
+        }
+      }
     }
 
-    if (block.type === 'table') {
-      bodyParts.push(renderDocxTable(block.headers, block.rows));
-      continue;
-    }
+    return children;
+  }
 
-    const codeText = block.text || '';
-    if (!codeText.trim()) {
-      bodyParts.push('<w:p/>');
-    } else {
-      codeText.split('\n').forEach((line) => {
-        bodyParts.push(renderDocxParagraph(line, { styleId: 'CodeBlock', monospace: true }));
-      });
+  // Gather all blocks from the document
+  const allBlocks: import('@/types').DocumentBlock[] = [];
+  if (richDoc.title) {
+    allBlocks.push({ type: 'heading', text: richDoc.title, level: 1 });
+  }
+  if (richDoc.subtitle) {
+    allBlocks.push({ type: 'paragraph', text: richDoc.subtitle });
+  }
+  if (richDoc.blocks) {
+    allBlocks.push(...richDoc.blocks);
+  }
+  if (richDoc.sections) {
+    for (const section of richDoc.sections) {
+      if (section.heading) {
+        allBlocks.push({ type: 'heading', text: section.heading, level: 2 });
+      }
+      allBlocks.push(...section.blocks);
     }
   }
 
-  const bodyXml = bodyParts.length > 0 ? bodyParts.join('') : '<w:p/>';
+  const sectionChildren = buildChildren(allBlocks);
 
-  const createdAt = new Date().toISOString();
-  const safeTitle = escapeXml(title || 'Artifact');
+  // Build header/footer if specified
+  const headers = richDoc.header ? {
+    default: new docx.Header({
+      children: [new docx.Paragraph({
+        children: [new docx.TextRun({ text: richDoc.header, font: theme.bodyFont, size: (theme.fontSize - 2) * 2, color: '999999' })],
+        alignment: docx.AlignmentType.CENTER,
+      })],
+    }),
+  } : undefined;
 
-  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
-</Types>`);
+  const footerChildren: ParagraphChild[] = [];
+  if (richDoc.footer) {
+    footerChildren.push(new docx.TextRun({ text: richDoc.footer, font: theme.bodyFont, size: (theme.fontSize - 2) * 2, color: '999999' }));
+  }
+  if (richDoc.showPageNumbers) {
+    if (footerChildren.length > 0) {
+      footerChildren.push(new docx.TextRun({ text: '  —  ', font: theme.bodyFont, size: (theme.fontSize - 2) * 2, color: '999999' }));
+    }
+    footerChildren.push(new docx.TextRun({ children: [docx.PageNumber.CURRENT], font: theme.bodyFont, size: (theme.fontSize - 2) * 2, color: '999999' }));
+  }
 
-  zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-</Relationships>`);
+  const footers = footerChildren.length > 0 ? {
+    default: new docx.Footer({
+      children: [new docx.Paragraph({
+        children: footerChildren,
+        alignment: docx.AlignmentType.CENTER,
+      })],
+    }),
+  } : undefined;
 
-  zip.file('docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dc:title>${safeTitle}</dc:title>
-  <dc:creator>Opus Artifacts</dc:creator>
-  <cp:lastModifiedBy>Opus Artifacts</cp:lastModifiedBy>
-  <dcterms:created xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:created>
-  <dcterms:modified xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:modified>
-</cp:coreProperties>`);
+  const document = new docx.Document({
+    creator: 'Opus Artifacts',
+    title: title || 'Document',
+    styles: {
+      default: {
+        document: {
+          run: {
+            font: theme.bodyFont,
+            size: theme.fontSize * 2,
+            color: theme.bodyColor,
+          },
+        },
+        heading1: {
+          run: { font: theme.headingFont, size: 36, bold: true, color: theme.primaryColor },
+          paragraph: { spacing: { before: 360, after: 120 } },
+        },
+        heading2: {
+          run: { font: theme.headingFont, size: 28, bold: true, color: theme.primaryColor },
+          paragraph: { spacing: { before: 240, after: 120 } },
+        },
+        heading3: {
+          run: { font: theme.headingFont, size: 24, bold: true, color: theme.primaryColor },
+          paragraph: { spacing: { before: 200, after: 100 } },
+        },
+        heading4: {
+          run: { font: theme.headingFont, size: 22, bold: true, color: theme.primaryColor },
+          paragraph: { spacing: { before: 160, after: 80 } },
+        },
+        heading5: {
+          run: { font: theme.headingFont, size: 20, bold: true, color: theme.primaryColor },
+          paragraph: { spacing: { before: 120, after: 80 } },
+        },
+        heading6: {
+          run: { font: theme.headingFont, size: 20, italics: true, color: theme.primaryColor },
+          paragraph: { spacing: { before: 120, after: 80 } },
+        },
+      },
+    },
+    numbering: {
+      config: [
+        {
+          reference: 'bullet-list',
+          levels: [
+            { level: 0, format: docx.LevelFormat.BULLET, text: '\u2022', alignment: docx.AlignmentType.START, style: { paragraph: { indent: { left: 720, hanging: 360 } } } },
+            { level: 1, format: docx.LevelFormat.BULLET, text: '\u25E6', alignment: docx.AlignmentType.START, style: { paragraph: { indent: { left: 1440, hanging: 360 } } } },
+            { level: 2, format: docx.LevelFormat.BULLET, text: '\u25AA', alignment: docx.AlignmentType.START, style: { paragraph: { indent: { left: 2160, hanging: 360 } } } },
+          ],
+        },
+        {
+          reference: 'ordered-list',
+          levels: [
+            { level: 0, format: docx.LevelFormat.DECIMAL, text: '%1.', alignment: docx.AlignmentType.START, style: { paragraph: { indent: { left: 720, hanging: 360 } } } },
+            { level: 1, format: docx.LevelFormat.LOWER_LETTER, text: '%2)', alignment: docx.AlignmentType.START, style: { paragraph: { indent: { left: 1440, hanging: 360 } } } },
+            { level: 2, format: docx.LevelFormat.LOWER_ROMAN, text: '%3.', alignment: docx.AlignmentType.START, style: { paragraph: { indent: { left: 2160, hanging: 360 } } } },
+          ],
+        },
+      ],
+    },
+    sections: [{
+      properties: {
+        page: {
+          size: { width: 12240, height: 15840 },
+          margin: { top: 1440, right: 1440, bottom: 1440, left: 1440, header: 720, footer: 720 },
+        },
+      },
+      headers,
+      footers,
+      children: sectionChildren,
+    }],
+  });
 
-  zip.file('docProps/app.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>Opus Artifacts</Application>
-</Properties>`);
-
-  zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    ${bodyXml}
-    <w:sectPr>
-      <w:pgSz w:w="12240" w:h="15840"/>
-      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
-    </w:sectPr>
-  </w:body>
-</w:document>`);
-
-  zip.file('word/styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
-    <w:name w:val="Normal"/>
-    <w:qFormat/>
-  </w:style>
-  <w:style w:type="paragraph" w:styleId="Heading1">
-    <w:name w:val="Heading 1"/>
-    <w:basedOn w:val="Normal"/>
-    <w:qFormat/>
-    <w:rPr>
-      <w:b/>
-      <w:sz w:val="36"/>
-    </w:rPr>
-  </w:style>
-  <w:style w:type="paragraph" w:styleId="Heading2">
-    <w:name w:val="Heading 2"/>
-    <w:basedOn w:val="Normal"/>
-    <w:qFormat/>
-    <w:rPr>
-      <w:b/>
-      <w:sz w:val="28"/>
-    </w:rPr>
-  </w:style>
-  <w:style w:type="paragraph" w:styleId="Heading3">
-    <w:name w:val="Heading 3"/>
-    <w:basedOn w:val="Normal"/>
-    <w:qFormat/>
-    <w:rPr>
-      <w:b/>
-      <w:sz w:val="24"/>
-    </w:rPr>
-  </w:style>
-  <w:style w:type="paragraph" w:styleId="CodeBlock">
-    <w:name w:val="Code Block"/>
-    <w:basedOn w:val="Normal"/>
-    <w:pPr>
-      <w:spacing w:before="80" w:after="80"/>
-      <w:shd w:val="clear" w:fill="F3F4F6"/>
-      <w:ind w:left="240" w:right="240"/>
-    </w:pPr>
-    <w:rPr>
-      <w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>
-      <w:sz w:val="20"/>
-    </w:rPr>
-  </w:style>
-  <w:style w:type="paragraph" w:styleId="TableHeader">
-    <w:name w:val="Table Header"/>
-    <w:basedOn w:val="Normal"/>
-    <w:rPr>
-      <w:b/>
-    </w:rPr>
-  </w:style>
-</w:styles>`);
-
-  zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`);
-
-  return zip.generateAsync({ type: 'blob', mimeType: DOCX_MIME });
+  return docx.Packer.toBlob(document);
 }
+
+// ===== Utility helpers (used by xlsx and slide parsing) =====
 
 function safeJsonParse(value: string): unknown | null {
   try {
@@ -584,251 +736,6 @@ function toStringArray(value: unknown): string[] {
 
 function normalizeTextValue(value: unknown): string {
   return String(value ?? '').trim();
-}
-
-function isMarkdownTableHeaderLine(line: string, nextLine?: string): boolean {
-  if (!line.includes('|') || !nextLine) return false;
-  return /^[:\-\|\s]+$/.test(nextLine.trim());
-}
-
-function splitMarkdownTableCells(line: string): string[] {
-  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
-  return trimmed.split('|').map(cell => cell.trim());
-}
-
-function looksLikeListItem(line: string): boolean {
-  return /^([-*+]|\d+\.)\s+/.test(line.trim());
-}
-
-function parseRichBlocksFromText(content: string): RichBlock[] {
-  const lines = normalizeLineEndings(content).split('\n');
-  const blocks: RichBlock[] = [];
-
-  let i = 0;
-  while (i < lines.length) {
-    const rawLine = lines[i];
-    const line = rawLine.trim();
-
-    if (!line) {
-      i++;
-      continue;
-    }
-
-    if (line.startsWith('```')) {
-      const language = line.slice(3).trim() || undefined;
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].trim().startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      if (i < lines.length && lines[i].trim().startsWith('```')) {
-        i++;
-      }
-      blocks.push({ type: 'code', text: codeLines.join('\n'), language });
-      continue;
-    }
-
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
-    if (headingMatch) {
-      blocks.push({
-        type: 'heading',
-        level: Math.min(headingMatch[1].length, 6),
-        text: headingMatch[2].trim(),
-      });
-      i++;
-      continue;
-    }
-
-    if (looksLikeListItem(line)) {
-      const ordered = /^\d+\.\s+/.test(line);
-      const items: string[] = [];
-      while (i < lines.length && looksLikeListItem(lines[i])) {
-        items.push(lines[i].trim().replace(/^([-*+]|\d+\.)\s+/, '').trim());
-        i++;
-      }
-      if (items.length > 0) {
-        blocks.push({ type: 'list', items, ordered });
-      }
-      continue;
-    }
-
-    if (isMarkdownTableHeaderLine(line, lines[i + 1])) {
-      const headers = splitMarkdownTableCells(line);
-      i += 2; // header + divider
-      const rows: string[][] = [];
-
-      while (i < lines.length && lines[i].includes('|')) {
-        rows.push(splitMarkdownTableCells(lines[i]));
-        i++;
-      }
-
-      blocks.push({ type: 'table', headers, rows });
-      continue;
-    }
-
-    const paragraphLines: string[] = [line];
-    i++;
-    while (i < lines.length) {
-      const next = lines[i].trim();
-      if (!next) break;
-      if (next.startsWith('```')) break;
-      if (/^(#{1,6})\s+/.test(next)) break;
-      if (looksLikeListItem(next)) break;
-      if (isMarkdownTableHeaderLine(next, lines[i + 1])) break;
-      paragraphLines.push(next);
-      i++;
-    }
-
-    blocks.push({
-      type: 'paragraph',
-      text: paragraphLines.join(' ').trim(),
-    });
-  }
-
-  return blocks;
-}
-
-function parseRichBlocksFromBlockSpec(block: unknown): RichBlock[] {
-  if (typeof block === 'string') {
-    return parseRichBlocksFromText(block);
-  }
-
-  if (!isObject(block)) {
-    return [];
-  }
-
-  const type = normalizeTextValue(block.type).toLowerCase();
-  if (!type) {
-    return [];
-  }
-
-  if (type === 'heading') {
-    const text = normalizeTextValue(block.text || block.title);
-    if (!text) return [];
-    const rawLevel = Number(block.level);
-    const level = Number.isFinite(rawLevel) ? Math.min(Math.max(Math.floor(rawLevel), 1), 6) : 1;
-    return [{ type: 'heading', text, level }];
-  }
-
-  if (type === 'paragraph') {
-    const text = normalizeTextValue(block.text || block.content);
-    return text ? [{ type: 'paragraph', text }] : [];
-  }
-
-  if (type === 'list') {
-    const items = toStringArray(block.items);
-    if (items.length === 0) return [];
-    const ordered = Boolean(block.ordered);
-    return [{ type: 'list', items, ordered }];
-  }
-
-  if (type === 'table') {
-    const headers = toStringArray(block.headers);
-    const rows = Array.isArray(block.rows)
-      ? block.rows.map((row) => Array.isArray(row) ? row.map(cell => String(cell ?? '').trim()) : [])
-      : [];
-    if (headers.length === 0 && rows.length === 0) return [];
-    return [{ type: 'table', headers, rows }];
-  }
-
-  if (type === 'code') {
-    const text = normalizeTextValue(block.text || block.content);
-    if (!text) return [];
-    const language = normalizeTextValue(block.language) || undefined;
-    return [{ type: 'code', text, language }];
-  }
-
-  return [];
-}
-
-function parseRichBlocksFromJson(value: unknown): RichBlock[] | null {
-  if (Array.isArray(value)) {
-    const blocks = value.flatMap(parseRichBlocksFromBlockSpec);
-    return blocks.length > 0 ? blocks : null;
-  }
-
-  if (!isObject(value)) {
-    return null;
-  }
-
-  const blocks: RichBlock[] = [];
-
-  if (typeof value.title === 'string' && value.title.trim()) {
-    blocks.push({ type: 'heading', text: value.title.trim(), level: 1 });
-  }
-
-  if (Array.isArray(value.blocks)) {
-    blocks.push(...value.blocks.flatMap(parseRichBlocksFromBlockSpec));
-  }
-
-  if (Array.isArray(value.sections)) {
-    for (const section of value.sections) {
-      if (!isObject(section)) continue;
-
-      const heading = normalizeTextValue(section.heading || section.title);
-      if (heading) {
-        blocks.push({ type: 'heading', text: heading, level: 2 });
-      }
-
-      const paragraphs = toStringArray(section.paragraphs);
-      for (const paragraph of paragraphs) {
-        blocks.push({ type: 'paragraph', text: paragraph });
-      }
-
-      const bullets = toStringArray(section.bullets);
-      if (bullets.length > 0) {
-        blocks.push({ type: 'list', ordered: false, items: bullets });
-      }
-
-      if (section.table && isObject(section.table)) {
-        const headers = toStringArray(section.table.headers);
-        const rows = Array.isArray(section.table.rows)
-          ? section.table.rows.map((row) => Array.isArray(row) ? row.map(cell => String(cell ?? '').trim()) : [])
-          : [];
-        if (headers.length > 0 || rows.length > 0) {
-          blocks.push({ type: 'table', headers, rows });
-        }
-      }
-    }
-  }
-
-  const topParagraphs = toStringArray(value.paragraphs);
-  for (const paragraph of topParagraphs) {
-    blocks.push({ type: 'paragraph', text: paragraph });
-  }
-
-  const topBullets = toStringArray(value.bullets);
-  if (topBullets.length > 0) {
-    blocks.push({ type: 'list', ordered: false, items: topBullets });
-  }
-
-  if (typeof value.content === 'string' && value.content.trim()) {
-    blocks.push(...parseRichBlocksFromText(value.content));
-  }
-
-  return blocks.length > 0 ? blocks : null;
-}
-
-function parseDocumentBlocks(content: string, fallbackTitle?: string): RichBlock[] {
-  const parsed = safeJsonParse(content);
-  let blocks: RichBlock[] | null = parsed ? parseRichBlocksFromJson(parsed) : null;
-
-  if (!blocks || blocks.length === 0) {
-    blocks = parseRichBlocksFromText(content);
-  }
-
-  if (fallbackTitle && !blocks.some(block => block.type === 'heading')) {
-    blocks = [{ type: 'heading', level: 1, text: fallbackTitle }, ...blocks];
-  }
-
-  if (blocks.length === 0) {
-    return fallbackTitle
-      ? [{ type: 'heading', level: 1, text: fallbackTitle }]
-      : [{ type: 'paragraph', text: '' }];
-  }
-
-  return blocks;
 }
 
 function sanitizeSheetName(name: string, fallback: string): string {
@@ -1002,7 +909,7 @@ function normalizeBulletText(line: string): string {
     .trim();
 }
 
-function toSlideFromBlocks(blocks: RichBlock[], fallbackTitle: string): SlideContent | null {
+function toSlideFromBlocks(blocks: FlatBlock[], fallbackTitle: string): SlideContent | null {
   if (blocks.length === 0) return null;
 
   let title = fallbackTitle;
@@ -1106,13 +1013,13 @@ function parseSlideValue(value: unknown, fallbackTitle: string): SlideContent | 
   };
 }
 
-function splitBlocksIntoSlides(blocks: RichBlock[], fallbackTitle: string): SlideContent[] {
+function splitBlocksIntoSlides(blocks: FlatBlock[], fallbackTitle: string): SlideContent[] {
   if (blocks.length === 0) {
     return [];
   }
 
-  const groups: RichBlock[][] = [];
-  let current: RichBlock[] = [];
+  const groups: FlatBlock[][] = [];
+  let current: FlatBlock[] = [];
 
   blocks.forEach((block) => {
     const startsNewSlide = block.type === 'heading' && block.level <= 1 && current.length > 0;
