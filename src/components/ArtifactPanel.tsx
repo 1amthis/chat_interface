@@ -10,6 +10,7 @@ import {
   getArtifactExportOptions,
   getExportFilename,
 } from '@/lib/artifact-export';
+import { notify } from '@/lib/notifications';
 
 interface ArtifactPanelProps {
   artifact: Artifact | undefined;
@@ -49,19 +50,19 @@ export function ArtifactPanel({
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const resizeRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
   const exportOptions = artifact ? getArtifactExportOptions(artifact) : [];
+  const htmlContentForPdf = artifact?.type === 'html' ? artifact.content : null;
 
   // PDF export hook for HTML artifacts
   const { downloadPdf, isGenerating: isGeneratingPdf, error: pdfError } = useHtmlToPdf(
-    iframeRef,
+    htmlContentForPdf,
     artifact?.title.replace(/[^a-z0-9]/gi, '_') || 'artifact'
   );
 
   // Show error message if PDF generation fails
   useEffect(() => {
     if (pdfError) {
-      alert(`Failed to generate PDF: ${pdfError}`);
+      notify(`Failed to generate PDF: ${pdfError}`, 'error');
     }
   }, [pdfError]);
 
@@ -138,7 +139,7 @@ export function ArtifactPanel({
       onDownload(artifact, exportFormat);
     } catch (error) {
       console.error('Failed to export artifact:', error);
-      alert(`Failed to export artifact as ${exportFormat.toUpperCase()}.`);
+      notify(`Failed to export artifact as ${exportFormat.toUpperCase()}.`, 'error');
     } finally {
       setIsExporting(false);
     }
@@ -292,7 +293,6 @@ export function ArtifactPanel({
           <ArtifactPreview
             artifact={artifact}
             versionIndex={selectedVersionIndex}
-            iframeRef={artifact.type === 'html' ? iframeRef : undefined}
           />
         )}
       </div>

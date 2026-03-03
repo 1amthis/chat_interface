@@ -198,7 +198,7 @@ export async function removeFromIndex(conversationId: string): Promise<void> {
  * Update global metadata (document frequencies, avg length, etc.)
  */
 export async function updateMetadata(): Promise<void> {
-  const db = await openDatabase();
+  await openDatabase();
 
   // Get all documents
   const docStore = await getStore(STORES.DOCUMENTS);

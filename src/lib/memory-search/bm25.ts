@@ -55,7 +55,6 @@ export function generateSnippet(
     return '';
   }
 
-  const lowerContent = content.toLowerCase();
   const querySet = new Set(queryTerms.map(t => t.toLowerCase()));
 
   // Find the best position - where query terms appear
@@ -67,7 +66,6 @@ export function generateSnippet(
   let charPos = 0;
 
   for (let i = 0; i < words.length; i++) {
-    const word = words[i].toLowerCase().replace(/[^\w]/g, '');
     let score = 0;
 
     // Score based on how many query terms are nearby (within 10 words)

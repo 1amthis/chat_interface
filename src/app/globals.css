@@ -2,6 +2,8 @@
 @plugin "@tailwindcss/typography";
 
 :root {
+  --font-geist-sans: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-geist-mono: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --background: #ffffff;
   --foreground: #171717;
   --chat-bg: #f7f7f8;

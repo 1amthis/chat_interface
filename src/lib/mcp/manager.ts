@@ -55,7 +55,7 @@ class MCPManager {
     // If config hasn't changed, check for disconnected servers to retry
     if (newHash === this.configHash) {
       // Retry connection for any disconnected servers
-      for (const [id, client] of this.clients.entries()) {
+      for (const [, client] of this.clients.entries()) {
         if (!client.isConnected) {
           try {
             await client.connect();

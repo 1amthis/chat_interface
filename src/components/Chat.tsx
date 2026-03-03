@@ -22,7 +22,6 @@ import { Sidebar } from './Sidebar';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { SettingsModal } from './SettingsModal';
-import { TokenUsageDisplay } from './TokenUsageDisplay';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ProjectDashboard } from './ProjectDashboard';
 import { KnowledgeBase } from './KnowledgeBase';
@@ -32,6 +31,7 @@ import { ConnectorsConfig } from './ConnectorsConfig';
 import { ArtifactPanel } from './ArtifactPanel';
 import { ContextInspector } from './ContextInspector';
 import { SystemPromptInspector } from './SystemPromptInspector';
+import { NotificationTray } from './NotificationTray';
 import { useTheme } from './ThemeProvider';
 import {
   useArtifacts,
@@ -180,12 +180,6 @@ export function Chat() {
   const [showModelsConfig, setShowModelsConfig] = useState(false);
   const [showConnectorsConfig, setShowConnectorsConfig] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
-  const [lastUsage, setLastUsage] = useState<TokenUsage | null>(null);
-  const [sessionUsage, setSessionUsage] = useState<TokenUsage>({
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-  });
   const [currentToolCalls, setCurrentToolCalls] = useState<ToolCall[]>([]);
   const [streamingContentBlocks, setStreamingContentBlocks] = useState<ContentBlock[]>([]);
   const [contextBreakdown, setContextBreakdown] = useState<ContextBreakdown | null>(null);
@@ -307,6 +301,19 @@ export function Chat() {
     }
   }, [currentConversation, isLoading, scrollToBottom]);
 
+  // Keyboard shortcut for system prompt inspector
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        setShowSystemPromptInspector(true);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const handleNewChat = useCallback(() => {
     setCurrentProjectId(null);
     setCurrentConversation(null);
@@ -315,8 +322,6 @@ export function Chat() {
     setShowModelsConfig(false);
     setShowConnectorsConfig(false);
     setStreamingContent('');
-    setLastUsage(null);
-    setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     resetArtifactPanel();
   }, [resetArtifactPanel]);
 
@@ -345,8 +350,6 @@ export function Chat() {
     setShowModelsConfig(false);
     setShowConnectorsConfig(false);
     setStreamingContent('');
-    setLastUsage(null);
-    setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     resetArtifactPanel();
   }, [projects, settings.provider, settings.model, resetArtifactPanel]);
 
@@ -360,8 +363,6 @@ export function Chat() {
       setShowModelsConfig(false);
       setShowConnectorsConfig(false);
       setStreamingContent('');
-      setLastUsage(null);
-      setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
       resetArtifactPanel();
     }
   }, [conversations, resetArtifactPanel]);
@@ -371,8 +372,6 @@ export function Chat() {
     setConversations(getConversations());
     if (currentConversation?.id === id) {
       setCurrentConversation(null);
-      setLastUsage(null);
-      setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     }
   }, [currentConversation?.id]);
 
@@ -485,12 +484,6 @@ export function Chat() {
     setSettings(nextSettings);
   }, [settings]);
 
-  const handlePickDriveFile = useCallback(() => {
-    // For now, show an alert. In a full implementation, this would open a Google Drive picker
-    // The Google Drive Picker API requires additional setup and a separate API key
-    alert('Google Drive file picker coming soon! For now, use the Google Drive search feature to find and reference files in your conversations.');
-  }, []);
-
   const handleOpenArtifactLibrary = useCallback(() => {
     setShowArtifactLibrary(true);
     setShowKnowledgeBase(false);
@@ -512,8 +505,6 @@ export function Chat() {
     setCurrentProjectId(null);
     setCurrentConversation(conv);
     setStreamingContent('');
-    setLastUsage(null);
-    setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     resetArtifactPanel();
 
     requestAnimationFrame(() => {
@@ -529,8 +520,6 @@ export function Chat() {
     setShowModelsConfig(false);
     setShowConnectorsConfig(false);
     setStreamingContent('');
-    setLastUsage(null);
-    setSessionUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     resetArtifactPanel();
   }, [resetArtifactPanel]);
 
@@ -771,16 +760,38 @@ export function Chat() {
       let currentTextContent = '';
       // Track current reasoning block being streamed
       let currentReasoningContent = '';
+      // Buffer SSE chunks to handle event boundaries correctly
+      let sseBuffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        sseBuffer += done
+          ? decoder.decode()
+          : decoder.decode(value, { stream: true });
 
-        const text = decoder.decode(value);
-        const lines = text.split('\n').filter((line) => line.startsWith('data: '));
+        // Normalize CRLF and flush any trailing event on stream end.
+        sseBuffer = sseBuffer.replace(/\r/g, '');
+        if (done) {
+          sseBuffer += '\n\n';
+        }
 
-        for (const line of lines) {
-          const data = line.slice(6);
+        const dataEvents: string[] = [];
+        let boundaryIndex = sseBuffer.indexOf('\n\n');
+        while (boundaryIndex !== -1) {
+          const eventChunk = sseBuffer.slice(0, boundaryIndex);
+          sseBuffer = sseBuffer.slice(boundaryIndex + 2);
+          boundaryIndex = sseBuffer.indexOf('\n\n');
+
+          if (!eventChunk.trim()) continue;
+          const dataLines = eventChunk
+            .split('\n')
+            .filter((line) => line.startsWith('data: '))
+            .map((line) => line.slice(6));
+          if (dataLines.length === 0) continue;
+          dataEvents.push(dataLines.join('\n'));
+        }
+
+        for (const data of dataEvents) {
           if (data === '[DONE]') continue;
 
           try {
@@ -871,18 +882,6 @@ export function Chat() {
             if (parsed.usage) {
               const usage = parsed.usage as TokenUsage;
               capturedUsage = usage;
-              setLastUsage(usage);
-              setSessionUsage((prev) => ({
-                ...(prev.reasoningTokens !== undefined || usage.reasoningTokens !== undefined
-                  ? { reasoningTokens: (prev.reasoningTokens ?? 0) + (usage.reasoningTokens ?? 0) }
-                  : {}),
-                ...(prev.cachedTokens !== undefined || usage.cachedTokens !== undefined
-                  ? { cachedTokens: (prev.cachedTokens ?? 0) + (usage.cachedTokens ?? 0) }
-                  : {}),
-                inputTokens: prev.inputTokens + usage.inputTokens,
-                outputTokens: prev.outputTokens + usage.outputTokens,
-                totalTokens: prev.totalTokens + usage.totalTokens,
-              }));
               // Record usage for cost tracking
               addUsageRecord({
                 provider: (currentProject?.provider || settings.provider) as Provider,
@@ -1454,6 +1453,8 @@ export function Chat() {
             throw e;
           }
         }
+
+        if (done) break;
       }
 
       // Add any remaining reasoning as a content block
@@ -1713,6 +1714,21 @@ export function Chat() {
         .pop()?.index ?? -1
     : -1;
 
+  const isMainChatSurface =
+    !showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig;
+
+  const headerTitle = showModelsConfig
+    ? 'Models & Providers'
+    : showConnectorsConfig
+    ? 'Connectors'
+    : showArtifactLibrary
+    ? 'Artifact Library'
+    : showKnowledgeBase
+    ? 'Knowledge Base'
+    : currentProjectId
+    ? projects.find(p => p.id === currentProjectId)?.name || 'Project'
+    : (currentConversation?.title || 'New chat');
+
   return (
     <div className="flex h-screen">
       <Sidebar
@@ -1769,86 +1785,49 @@ export function Chat() {
         className="flex-1 flex flex-col h-screen transition-all duration-200"
         style={artifactPanelOpen ? { marginRight: `${artifactPanelWidth}%` } : undefined}
       >
-        <header className="h-14 border-b border-[var(--border-color)] flex items-center justify-between px-4">
-          <div className="flex items-center gap-2">
-            <h1 className="font-medium">
-              {showModelsConfig
-                ? 'Models & Providers'
-                : showConnectorsConfig
-                ? 'Connectors'
-                : showArtifactLibrary
-                ? 'Artifact Library'
-                : showKnowledgeBase
-                ? 'Knowledge Base'
-                : currentProjectId
-                ? projects.find(p => p.id === currentProjectId)?.name || 'Project'
-                : (currentConversation?.title || 'New chat')}
-            </h1>
-            {settings.webSearchEnabled && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 flex items-center gap-1">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                Web
-              </span>
-            )}
-            {settings.googleDriveEnabled && settings.googleDriveAccessToken && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 flex items-center gap-1">
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M7.71 3.5L1.15 15l4.58 7.5h13.54l4.58-7.5L17.29 3.5H7.71zm.79 1h8l5.14 10L17.5 21h-11l-4.14-6.5 5.14-10z"/>
-                </svg>
-                Drive
-              </span>
+        <header className="h-14 border-b border-[var(--border-color)] px-3 sm:px-4">
+          <div className="flex h-full min-w-0 items-center gap-2">
+            <h1 className="min-w-0 flex-1 truncate text-sm font-medium sm:text-base">{headerTitle}</h1>
+
+            {isMainChatSurface && !currentProjectId && (
+              <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+                <button
+                  onClick={() => setShowContextInspector(true)}
+                  disabled={!contextBreakdown}
+                  className="shrink-0 text-xs px-2 py-1 rounded border border-[var(--border-color)] hover:bg-[var(--border-color)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="Open context inspector"
+                >
+                  Context
+                </button>
+
+                <select
+                  value={settings.provider}
+                  onChange={(e) => handleProviderChange(e.target.value as Provider)}
+                  className="shrink-0 w-[120px] text-xs sm:text-sm px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--background)]"
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="google">Google (Gemini)</option>
+                  <option value="mistral">Mistral</option>
+                  <option value="cerebras">Cerebras</option>
+                </select>
+                <select
+                  value={settings.model}
+                  onChange={(e) => handleModelChange(e.target.value)}
+                  className="shrink-0 w-[170px] sm:w-[220px] text-xs sm:text-sm px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--background)]"
+                >
+                  {[
+                    ...DEFAULT_MODELS[settings.provider],
+                    ...(settings.customModels?.[settings.provider] || []),
+                  ].map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              </div>
             )}
           </div>
-          {!showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig && (
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setShowSystemPromptInspector(true)}
-                className="text-xs px-2.5 py-1.5 rounded border border-[var(--border-color)] hover:bg-[var(--border-color)] transition-colors"
-                title="Inspect the effective system prompt"
-              >
-                Prompt
-              </button>
-              {!currentProjectId && (
-                <>
-                  <TokenUsageDisplay
-                    sessionUsage={sessionUsage}
-                    model={settings.model}
-                    hasContextBreakdown={!!contextBreakdown}
-                    onOpenContextInspector={() => setShowContextInspector(true)}
-                  />
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={settings.provider}
-                      onChange={(e) => handleProviderChange(e.target.value as Provider)}
-                      className="text-sm px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--background)]"
-                    >
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="google">Google (Gemini)</option>
-                      <option value="mistral">Mistral</option>
-                      <option value="cerebras">Cerebras</option>
-                    </select>
-                    <select
-                      value={settings.model}
-                      onChange={(e) => handleModelChange(e.target.value)}
-                      className="text-sm px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--background)] max-w-[180px]"
-                    >
-                      {[
-                        ...DEFAULT_MODELS[settings.provider],
-                        ...(settings.customModels?.[settings.provider] || []),
-                      ].map((model) => (
-                        <option key={model} value={model}>
-                          {model}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
         </header>
 
         <main ref={mainRef} className="flex-1 overflow-y-auto relative">
@@ -1889,6 +1868,7 @@ export function Chat() {
             />
           ) : currentProjectId && activeProject ? (
             <ProjectDashboard
+              key={activeProject.id}
               project={activeProject}
               conversations={conversations.filter(c => c.projectId === currentProjectId)}
               onSelectConversation={handleSelectConversation}
@@ -1899,7 +1879,6 @@ export function Chat() {
               onUpdateFiles={(files) =>
                 handleUpdateProjectFiles(currentProjectId, files)
               }
-              onDeleteConversation={handleDeleteConversation}
               isLoading={isLoading}
               onStop={handleStop}
               webSearchEnabled={settings.webSearchEnabled}
@@ -1907,7 +1886,6 @@ export function Chat() {
               googleDriveEnabled={settings.googleDriveEnabled}
               onToggleGoogleDrive={handleToggleGoogleDrive}
               googleDriveConnected={!!settings.googleDriveAccessToken}
-              onPickDriveFile={handlePickDriveFile}
               memorySearchEnabled={settings.memorySearchEnabled}
               onToggleMemorySearch={handleToggleMemorySearch}
               ragEnabled={settings.ragEnabled}
@@ -2015,7 +1993,6 @@ export function Chat() {
               googleDriveEnabled={settings.googleDriveEnabled}
               onToggleGoogleDrive={handleToggleGoogleDrive}
               googleDriveConnected={!!settings.googleDriveAccessToken}
-              onPickDriveFile={handlePickDriveFile}
               memorySearchEnabled={settings.memorySearchEnabled}
               onToggleMemorySearch={handleToggleMemorySearch}
               ragEnabled={settings.ragEnabled}
@@ -2056,6 +2033,8 @@ export function Chat() {
           onClose={() => setShowSystemPromptInspector(false)}
         />
       )}
+
+      <NotificationTray />
 
       {/* Context Inspector */}
       {showContextInspector && contextBreakdown && (

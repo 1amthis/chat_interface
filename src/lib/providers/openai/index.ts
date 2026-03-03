@@ -249,7 +249,7 @@ export async function* streamOpenAI(
               source: 'artifact',
             });
           }
-        } catch (e) {
+        } catch {
           // Invalid tool call arguments - warn instead of silently dropping
           console.warn(
             `[OpenAI] Failed to parse tool call arguments for "${tc.name}":`,
@@ -653,9 +653,9 @@ export async function* streamOpenAIResponses(
 
           // Determine tool source from name using shared parser
           const parsed = parseToolName(fc.name);
-          let toolName = parsed.name;
+          const toolName = parsed.name;
           let toolSource: ToolSource = parsed.source as ToolSource;
-          let toolServerId: string | undefined = parsed.serverId;
+          const toolServerId: string | undefined = parsed.serverId;
 
           // Override source for special tool types not handled by parseToolName
           if (fc.name === 'web_search') {
@@ -678,7 +678,7 @@ export async function* streamOpenAIResponses(
             toolSource,
             toolServerId,
           };
-        } catch (e) {
+        } catch {
           // Invalid JSON arguments - warn instead of silently dropping
           console.warn(
             `[OpenAI Responses] Failed to parse function call arguments for "${fc.name}":`,

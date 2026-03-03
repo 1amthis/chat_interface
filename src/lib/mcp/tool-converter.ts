@@ -133,6 +133,8 @@ export function formatMCPResultForProvider(
   result: MCPCallToolResult,
   provider: Provider
 ): string {
+  void provider;
+
   if (result.isError) {
     const errorText = result.content
       .filter((c) => c.type === 'text')

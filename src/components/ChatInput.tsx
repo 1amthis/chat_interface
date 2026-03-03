@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-img-element */
 
 import { useState, useRef, useEffect, useMemo, useCallback, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Attachment, Provider } from '@/types';
@@ -12,6 +13,7 @@ import {
   modelSupportsVision,
   getVisionSuggestion,
 } from '@/lib/utils';
+import { notify } from '@/lib/notifications';
 
 const IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml';
 
@@ -24,7 +26,6 @@ interface ChatInputProps {
   googleDriveEnabled?: boolean;
   onToggleGoogleDrive?: () => void;
   googleDriveConnected?: boolean;
-  onPickDriveFile?: () => void;
   memorySearchEnabled?: boolean;
   onToggleMemorySearch?: () => void;
   ragEnabled?: boolean;
@@ -53,7 +54,6 @@ export function ChatInput({
   googleDriveEnabled,
   onToggleGoogleDrive,
   googleDriveConnected,
-  onPickDriveFile,
   memorySearchEnabled,
   onToggleMemorySearch,
   ragEnabled,
@@ -75,18 +75,13 @@ export function ChatInput({
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [visionBannerDismissed, setVisionBannerDismissed] = useState(false);
+  const [dismissedVisionContext, setDismissedVisionContext] = useState<string | null>(null);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const toolsMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
-
-  // Reset vision banner dismissal when model/provider changes
-  useEffect(() => {
-    setVisionBannerDismissed(false);
-  }, [currentModel, currentProvider]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -128,6 +123,11 @@ export function ChatInput({
     () => modelSupportsVision(currentModel),
     [currentModel],
   );
+  const currentVisionContext = useMemo(
+    () => `${currentProvider}:${currentModel}`,
+    [currentProvider, currentModel],
+  );
+  const visionBannerDismissed = dismissedVisionContext === currentVisionContext;
   const visionSuggestion = useMemo(
     () =>
       hasImages && !supportsVision
@@ -183,12 +183,12 @@ export function ChatInput({
 
     for (const file of files) {
       if (file.size > MAX_FILE_SIZE) {
-        alert(`File "${file.name}" is too large. Maximum size is 20MB.`);
+        notify(`File "${file.name}" is too large. Maximum size is 20MB.`, 'warning');
         continue;
       }
 
       if (!ACCEPTED_FILE_TYPES.includes(file.type)) {
-        alert(`File type "${file.type || 'unknown'}" is not supported.`);
+        notify(`File type "${file.type || 'unknown'}" is not supported.`, 'warning');
         continue;
       }
 
@@ -369,7 +369,7 @@ export function ChatInput({
                   </button>
                 )}
                 <button
-                  onClick={() => setVisionBannerDismissed(true)}
+                  onClick={() => setDismissedVisionContext(currentVisionContext)}
                   className="text-xs text-amber-600 dark:text-amber-400 hover:underline"
                 >
                   Dismiss

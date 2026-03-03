@@ -1,14 +1,12 @@
 'use client';
 
-import { useMemo, forwardRef } from 'react';
+import { useMemo } from 'react';
 
 interface HTMLPreviewProps {
   content: string;
-  onLoad?: () => void;
 }
 
-export const HTMLPreview = forwardRef<HTMLIFrameElement, HTMLPreviewProps>(
-  ({ content, onLoad }, ref) => {
+export function HTMLPreview({ content }: HTMLPreviewProps) {
   // Wrap content in a basic HTML structure if it doesn't have one
   const fullHTML = useMemo(() => {
     const hasHtmlTag = /<html/i.test(content);
@@ -44,15 +42,11 @@ ${content}
 
   return (
     <iframe
-      ref={ref}
       srcDoc={fullHTML}
-      sandbox="allow-scripts allow-same-origin"
+      sandbox="allow-scripts"
       className="w-full h-full border-none bg-white"
       title="HTML Preview"
       referrerPolicy="no-referrer"
-      onLoad={onLoad}
     />
   );
-});
-
-HTMLPreview.displayName = 'HTMLPreview';
+}

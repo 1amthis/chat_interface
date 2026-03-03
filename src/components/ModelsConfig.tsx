@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ChatSettings, Provider, DEFAULT_MODELS, ApiKeyValidationStatus } from '@/types';
-import { getModelMetadata, getTierColor, formatContextWindow, calculateCost, ModelMetadata } from '@/lib/model-metadata';
+import { getModelMetadata, getTierColor, formatContextWindow, ModelMetadata } from '@/lib/model-metadata';
 import { getUsageRecords, getAggregatedUsage, clearUsageRecords, AggregatedUsage } from '@/lib/storage';
+import { notify } from '@/lib/notifications';
 
 interface ModelsConfigProps {
   settings: ChatSettings;
@@ -125,6 +126,8 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
   const [usageOpen, setUsageOpen] = useState(false);
   const [usageFilter, setUsageFilter] = useState<UsageTimeFilter>('all');
   const [usageData, setUsageData] = useState<AggregatedUsage[]>([]);
+  const [confirmClearUsage, setConfirmClearUsage] = useState(false);
+  const clearConfirmTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const refreshUsage = useCallback(() => {
     setUsageData(getAggregatedUsage(getFilterTimestamp(usageFilter)));
@@ -133,6 +136,37 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
   useEffect(() => {
     if (usageOpen) refreshUsage();
   }, [usageOpen, refreshUsage]);
+
+  useEffect(() => {
+    return () => {
+      if (clearConfirmTimeoutRef.current) {
+        clearTimeout(clearConfirmTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleClearUsage = useCallback(() => {
+    if (!confirmClearUsage) {
+      setConfirmClearUsage(true);
+      notify('Click "Confirm Clear" within 3 seconds to remove all usage data.', 'warning');
+      if (clearConfirmTimeoutRef.current) {
+        clearTimeout(clearConfirmTimeoutRef.current);
+      }
+      clearConfirmTimeoutRef.current = setTimeout(() => {
+        setConfirmClearUsage(false);
+      }, 3000);
+      return;
+    }
+
+    clearUsageRecords();
+    refreshUsage();
+    setConfirmClearUsage(false);
+    if (clearConfirmTimeoutRef.current) {
+      clearTimeout(clearConfirmTimeoutRef.current);
+      clearConfirmTimeoutRef.current = null;
+    }
+    notify('Usage data cleared.', 'success');
+  }, [confirmClearUsage, refreshUsage]);
 
   // Auto-revalidate stale keys (>24h) on mount
   useEffect(() => {
@@ -930,15 +964,14 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
                 ))}
               </div>
               <button
-                onClick={() => {
-                  if (confirm('Clear all usage data? This cannot be undone.')) {
-                    clearUsageRecords();
-                    refreshUsage();
-                  }
-                }}
-                className="text-xs px-2 py-0.5 rounded border border-[var(--border-color)] hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-300 dark:hover:border-red-700 text-gray-500 hover:text-red-600 transition-colors"
+                onClick={handleClearUsage}
+                className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                  confirmClearUsage
+                    ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
+                    : 'border-[var(--border-color)] hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-300 dark:hover:border-red-700 text-gray-500 hover:text-red-600'
+                }`}
               >
-                Clear
+                {confirmClearUsage ? 'Confirm Clear' : 'Clear'}
               </button>
             </div>
 

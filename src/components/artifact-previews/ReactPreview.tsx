@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { transform } from 'sucrase';
 
 interface ReactPreviewProps {
@@ -8,12 +8,8 @@ interface ReactPreviewProps {
 }
 
 export function ReactPreview({ content }: ReactPreviewProps) {
-  const [error, setError] = useState<string | null>(null);
-
-  const htmlContent = useMemo(() => {
+  const { htmlContent, error } = useMemo(() => {
     try {
-      setError(null);
-
       // Transpile only JSX, not imports/exports
       const result = transform(content, {
         transforms: ['jsx'],
@@ -41,7 +37,8 @@ export function ReactPreview({ content }: ReactPreviewProps) {
       processedCode = processedCode.replace(/export\s+const\s+/g, 'const ');
 
       // Create an HTML document that loads React from CDN and runs the component
-      return `<!DOCTYPE html>
+      return {
+        htmlContent: `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -89,11 +86,15 @@ export function ReactPreview({ content }: ReactPreviewProps) {
     }
   </script>
 </body>
-</html>`;
+</html>`,
+        error: null as string | null,
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Transpilation failed';
-      setError(message);
-      return '';
+      return {
+        htmlContent: '',
+        error: message,
+      };
     }
   }, [content]);
 

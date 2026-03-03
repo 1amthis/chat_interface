@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-img-element */
 
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { Project, Conversation, ProjectFile, Attachment, Provider } from '@/types';
@@ -12,6 +13,7 @@ import {
   MAX_FILE_SIZE,
   ACCEPTED_FILE_TYPES,
 } from '@/lib/utils';
+import { notify } from '@/lib/notifications';
 
 interface ProjectDashboardProps {
   project: Project;
@@ -20,7 +22,6 @@ interface ProjectDashboardProps {
   onSendMessage: (message: string, attachments: Attachment[]) => void;
   onUpdateInstructions: (instructions: string | undefined) => void;
   onUpdateFiles: (files: ProjectFile[] | undefined) => void;
-  onDeleteConversation: (id: string) => void;
   isLoading: boolean;
   onStop?: () => void;
   webSearchEnabled?: boolean;
@@ -28,7 +29,6 @@ interface ProjectDashboardProps {
   googleDriveEnabled?: boolean;
   onToggleGoogleDrive?: () => void;
   googleDriveConnected?: boolean;
-  onPickDriveFile?: () => void;
   memorySearchEnabled?: boolean;
   onToggleMemorySearch?: () => void;
   ragEnabled?: boolean;
@@ -55,7 +55,6 @@ export function ProjectDashboard({
   onSendMessage,
   onUpdateInstructions,
   onUpdateFiles,
-  onDeleteConversation,
   isLoading,
   onStop,
   webSearchEnabled,
@@ -63,7 +62,6 @@ export function ProjectDashboard({
   googleDriveEnabled,
   onToggleGoogleDrive,
   googleDriveConnected,
-  onPickDriveFile,
   memorySearchEnabled,
   onToggleMemorySearch,
   ragEnabled,
@@ -89,35 +87,49 @@ export function ProjectDashboard({
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveStatusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sync local instructions state when switching projects
-  useEffect(() => {
-    setInstructions(project.instructions || '');
-    setSaveStatus(null);
-  }, [project.id]);
-
-  // Auto-save instructions with debounce
-  useEffect(() => {
-    if (instructions !== (project.instructions || '')) {
-      setSaveStatus('saving');
-
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-
-      saveTimeoutRef.current = setTimeout(() => {
-        onUpdateInstructions(instructions || undefined);
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus(null), 2000);
-      }, 1000);
+  const clearSaveTimers = () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
     }
+    if (saveStatusTimeoutRef.current) {
+      clearTimeout(saveStatusTimeoutRef.current);
+      saveStatusTimeoutRef.current = null;
+    }
+  };
 
+  useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
+      if (saveStatusTimeoutRef.current) {
+        clearTimeout(saveStatusTimeoutRef.current);
+      }
     };
-  }, [instructions, project.instructions, onUpdateInstructions]);
+  }, []);
+
+  const handleInstructionsChange = (nextInstructions: string) => {
+    setInstructions(nextInstructions);
+    clearSaveTimers();
+
+    const existingInstructions = project.instructions || '';
+    if (nextInstructions === existingInstructions) {
+      setSaveStatus(null);
+      return;
+    }
+
+    setSaveStatus('saving');
+    saveTimeoutRef.current = setTimeout(() => {
+      onUpdateInstructions(nextInstructions || undefined);
+      setSaveStatus('saved');
+      saveStatusTimeoutRef.current = setTimeout(() => {
+        setSaveStatus(null);
+      }, 2000);
+    }, 1000);
+  };
 
   const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -127,12 +139,12 @@ export function ProjectDashboard({
 
     for (const file of Array.from(files)) {
       if (file.size > MAX_FILE_SIZE) {
-        alert(`File "${file.name}" is too large. Maximum size is 20MB.`);
+        notify(`File "${file.name}" is too large. Maximum size is 20MB.`, 'warning');
         continue;
       }
 
       if (!ACCEPTED_FILE_TYPES.includes(file.type)) {
-        alert(`File type "${file.type}" is not supported.`);
+        notify(`File type "${file.type}" is not supported.`, 'warning');
         continue;
       }
 
@@ -203,7 +215,7 @@ export function ProjectDashboard({
           <div className="p-4">
             <textarea
               value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
+              onChange={(e) => handleInstructionsChange(e.target.value)}
               placeholder="Additional instructions for all conversations in this project..."
               className="w-full min-h-[120px] px-3 py-2 border border-[var(--border-color)] rounded bg-[var(--background)] resize-y"
             />
@@ -375,7 +387,6 @@ export function ProjectDashboard({
         googleDriveEnabled={googleDriveEnabled}
         onToggleGoogleDrive={onToggleGoogleDrive}
         googleDriveConnected={googleDriveConnected}
-        onPickDriveFile={onPickDriveFile}
         memorySearchEnabled={memorySearchEnabled}
         onToggleMemorySearch={onToggleMemorySearch}
         ragEnabled={ragEnabled}

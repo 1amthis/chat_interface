@@ -2,6 +2,7 @@ import { Conversation, ChatSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, Folder, P
 import { calculateCost } from './model-metadata';
 import { STORAGE_LIMITS } from './constants';
 import { getActivePathIds } from './conversation-tree';
+import { notify } from './notifications';
 
 const CONVERSATIONS_KEY = 'chat_conversations';
 const SETTINGS_KEY = 'chat_settings';
@@ -99,7 +100,7 @@ function trimConversations(conversations: Conversation[]): Conversation[] {
   );
 
   // Keep only MAX_CONVERSATIONS most recent
-  let trimmed = sorted.slice(0, MAX_CONVERSATIONS);
+  const trimmed = sorted.slice(0, MAX_CONVERSATIONS);
 
   // Check total size and remove oldest if still too large
   while (trimmed.length > 1 && getTotalStorageSize(trimmed) > MAX_STORAGE_SIZE) {
@@ -212,10 +213,10 @@ export function saveConversation(conversation: Conversation): void {
         console.warn(`[Storage] Emergency cleanup: Kept ${minimal.length} conversations`);
 
         // Show user-friendly error
-        alert('Storage limit reached. Older conversations have been removed to save space. Consider exporting important conversations.');
+        notify('Storage limit reached. Older conversations were removed to save space. Consider exporting important conversations.', 'warning');
       } catch (emergencyError) {
         console.error('[Storage] Emergency cleanup failed:', emergencyError);
-        alert('Storage limit exceeded. Please clear some conversations manually or export them.');
+        notify('Storage limit exceeded. Please clear some conversations manually or export them.', 'error');
         throw error;
       }
     } else {
@@ -409,7 +410,7 @@ export function importConversations(jsonData: string): void {
     );
 
     localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(unique));
-  } catch (error) {
+  } catch {
     throw new Error('Invalid conversation data');
   }
 }

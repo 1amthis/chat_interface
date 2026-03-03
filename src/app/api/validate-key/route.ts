@@ -19,10 +19,9 @@ export async function POST(request: NextRequest) {
     if (provider === 'openai') {
       const client = new OpenAI({ apiKey });
       const list = await client.models.list();
-      // Iterate once to verify the key works, then break
-      for await (const _model of list) {
-        break;
-      }
+      // Read one item to verify the key works
+      const iterator = list[Symbol.asyncIterator]();
+      await iterator.next();
     } else if (provider === 'anthropic') {
       const client = new Anthropic({ apiKey });
       await client.models.list({ limit: 1 });
@@ -37,15 +36,13 @@ export async function POST(request: NextRequest) {
     } else if (provider === 'mistral') {
       const client = new OpenAI({ apiKey, baseURL: 'https://api.mistral.ai/v1' });
       const list = await client.models.list();
-      for await (const _model of list) {
-        break;
-      }
+      const iterator = list[Symbol.asyncIterator]();
+      await iterator.next();
     } else if (provider === 'cerebras') {
       const client = new OpenAI({ apiKey, baseURL: 'https://api.cerebras.ai/v1' });
       const list = await client.models.list();
-      for await (const _model of list) {
-        break;
-      }
+      const iterator = list[Symbol.asyncIterator]();
+      await iterator.next();
     } else {
       return NextResponse.json({ valid: false, error: `Unsupported provider: ${provider}` });
     }

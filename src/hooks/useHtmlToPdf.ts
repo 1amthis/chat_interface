@@ -1,4 +1,4 @@
-import { useState, useCallback, RefObject } from 'react';
+import { useState, useCallback } from 'react';
 import type { PdfExportOptions } from '@/types';
 
 interface UseHtmlToPdfReturn {
@@ -8,7 +8,7 @@ interface UseHtmlToPdfReturn {
 }
 
 export function useHtmlToPdf(
-  iframeRef: RefObject<HTMLIFrameElement | null>,
+  htmlContent: string | null | undefined,
   filename: string
 ): UseHtmlToPdfReturn {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -22,23 +22,51 @@ export function useHtmlToPdf(
       // Dynamically import html2pdf.js to prevent SSR issues and reduce initial bundle
       const html2pdf = (await import('html2pdf.js')).default;
 
-      // Access iframe content
-      const iframe = iframeRef.current;
-      if (!iframe) {
-        throw new Error('Iframe reference not available');
+      if (!htmlContent) {
+        throw new Error('HTML content is not available');
       }
 
-      // Wait for iframe to be fully loaded
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Build a sanitized, temporary document for PDF export.
+      // We intentionally strip scripts/event handlers to avoid executing untrusted artifact code.
+      const parser = new DOMParser();
+      const parsed = parser.parseFromString(htmlContent, 'text/html');
+      parsed.querySelectorAll('script').forEach((el) => el.remove());
+      parsed.querySelectorAll('*').forEach((el) => {
+        for (const attr of Array.from(el.attributes)) {
+          const name = attr.name.toLowerCase();
+          const value = attr.value.trim().toLowerCase();
+          if (name.startsWith('on')) {
+            el.removeAttribute(attr.name);
+          } else if ((name === 'href' || name === 'src') && value.startsWith('javascript:')) {
+            el.removeAttribute(attr.name);
+          }
+        }
+      });
 
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!iframeDoc) {
-        throw new Error('Cannot access iframe content');
-      }
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.left = '-99999px';
+      iframe.style.top = '0';
+      iframe.style.width = '1024px';
+      iframe.style.height = '768px';
+      iframe.style.opacity = '0';
+      iframe.style.pointerEvents = 'none';
+      iframe.setAttribute('aria-hidden', 'true');
 
-      const element = iframeDoc.documentElement;
-      if (!element) {
-        throw new Error('Iframe content is not available');
+      const doctype = '<!DOCTYPE html>';
+      iframe.srcdoc = `${doctype}${parsed.documentElement.outerHTML}`;
+      document.body.appendChild(iframe);
+
+      await new Promise<void>((resolve, reject) => {
+        iframe.onload = () => resolve();
+        iframe.onerror = () => reject(new Error('Failed to initialize HTML export document'));
+      });
+
+      const iframeDoc = iframe.contentDocument;
+      const element = iframeDoc?.documentElement;
+      if (!iframeDoc || !element) {
+        iframe.remove();
+        throw new Error('Cannot access temporary HTML export document');
       }
 
       // Configure PDF options with better page break handling
@@ -72,10 +100,14 @@ export function useHtmlToPdf(
       };
 
       // Generate and download PDF using documentElement
-      await html2pdf()
-        .set(options)
-        .from(element)
-        .save();
+      try {
+        await html2pdf()
+          .set(options)
+          .from(element)
+          .save();
+      } finally {
+        iframe.remove();
+      }
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate PDF';
@@ -85,7 +117,7 @@ export function useHtmlToPdf(
     } finally {
       setIsGenerating(false);
     }
-  }, [iframeRef, filename]);
+  }, [htmlContent, filename]);
 
   return {
     downloadPdf,

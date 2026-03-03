@@ -36,7 +36,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: CallToolRequest = await request.json();
-    let { source, serverId, toolName, params } = body;
+    let { source, serverId, toolName } = body;
+    const { params } = body;
     const { prefixedToolName, builtinToolsConfig, provider } = body;
 
     // Parse prefixed tool name if provided

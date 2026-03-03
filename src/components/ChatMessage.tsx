@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-img-element */
 
 import { useMemo, useState } from 'react';
 import { Message, Attachment, ContentBlock, Artifact, ReasoningContentBlock, ContextBreakdown, WebSearchResponse, ToolCall } from '@/types';

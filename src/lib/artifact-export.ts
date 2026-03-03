@@ -1091,7 +1091,7 @@ export function parseSlides(content: string, fallbackTitle: string): SlideConten
 
 import type PptxGenJS from 'pptxgenjs';
 import { parsePresentationContent } from './presentation-parser';
-import type { RichSlide, SlideBullet, SlideTable, SlideChart, SlideImage, SlideShape, PresentationTheme } from '@/types';
+import type { RichSlide, SlideBullet, SlideTable, SlideChart, SlideImage, SlideShape } from '@/types';
 
 interface ThemeDefaults {
   background: string;

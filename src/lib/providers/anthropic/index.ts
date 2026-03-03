@@ -297,7 +297,7 @@ export async function* streamAnthropic(
             toolThinkingSignature: currentThinkingSignature || undefined,
           };
         }
-      } catch (e) {
+      } catch {
         // Invalid tool call arguments - warn instead of silently dropping
         console.warn(
           `[Anthropic] Failed to parse tool call arguments for "${currentToolName}":`,

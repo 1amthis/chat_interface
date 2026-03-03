@@ -646,7 +646,7 @@ function cleanHtml(html: string): { title: string | null; content: string } {
   const markdown = nodeToMarkdown(contentRoot);
 
   // Normalize whitespace
-  let content = markdown
+  const content = markdown
     .replace(/[^\S\n]+/g, ' ')
     .split('\n').map((l: string) => l.trim()).join('\n')
     .replace(/\n{3,}/g, '\n\n')

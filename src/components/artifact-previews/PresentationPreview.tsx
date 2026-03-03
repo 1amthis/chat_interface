@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-img-element */
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { parsePresentationContent } from '@/lib/presentation-parser';
@@ -181,7 +182,7 @@ function ChartPreview({ chart, colors }: { chart: SlideChart; colors: ThemeColor
   );
 }
 
-function SlideRenderer({ slide, theme, slideNumber }: { slide: RichSlide; theme: ThemeColors; slideNumber: number }) {
+function SlideRenderer({ slide, theme }: { slide: RichSlide; theme: ThemeColors }) {
   const layout = slide.layout ?? 'title-content';
   const bg = hexToCSS(cleanHex(slide.background, theme.background));
   const titleColor = hexToCSS(cleanHex(slide.titleColor, theme.titleColor));
@@ -336,16 +337,17 @@ export function PresentationPreview({ content }: PresentationPreviewProps) {
 
   const theme = useMemo(() => resolveTheme(presentation.theme), [presentation.theme]);
   const slideCount = presentation.slides.length;
+  const maxSlideIndex = Math.max(0, slideCount - 1);
+  const clampedSlide = Math.min(currentSlide, maxSlideIndex);
 
-  // Reset slide index if content changes and index is out of bounds
-  useEffect(() => {
-    if (currentSlide >= slideCount) {
-      setCurrentSlide(Math.max(0, slideCount - 1));
-    }
-  }, [slideCount, currentSlide]);
-
-  const goNext = useCallback(() => setCurrentSlide(i => Math.min(i + 1, slideCount - 1)), [slideCount]);
-  const goPrev = useCallback(() => setCurrentSlide(i => Math.max(i - 1, 0)), []);
+  const goNext = useCallback(
+    () => setCurrentSlide((i) => Math.min(Math.min(i, maxSlideIndex) + 1, maxSlideIndex)),
+    [maxSlideIndex]
+  );
+  const goPrev = useCallback(
+    () => setCurrentSlide((i) => Math.max(Math.min(i, maxSlideIndex) - 1, 0)),
+    [maxSlideIndex]
+  );
 
   // Keyboard navigation
   useEffect(() => {
@@ -379,9 +381,8 @@ export function PresentationPreview({ content }: PresentationPreviewProps) {
           }}
         >
           <SlideRenderer
-            slide={presentation.slides[currentSlide]}
+            slide={presentation.slides[clampedSlide]}
             theme={theme}
-            slideNumber={currentSlide + 1}
           />
         </div>
       </div>
@@ -390,7 +391,7 @@ export function PresentationPreview({ content }: PresentationPreviewProps) {
       <div className="flex items-center justify-center gap-3 py-2 border-t" style={{ borderColor: 'var(--border-color, #e5e7eb)' }}>
         <button
           onClick={goPrev}
-          disabled={currentSlide === 0}
+          disabled={clampedSlide === 0}
           className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           title="Previous slide"
         >
@@ -399,11 +400,11 @@ export function PresentationPreview({ content }: PresentationPreviewProps) {
           </svg>
         </button>
         <span className="text-xs text-gray-500 tabular-nums min-w-[4em] text-center">
-          {currentSlide + 1} / {slideCount}
+          {clampedSlide + 1} / {slideCount}
         </span>
         <button
           onClick={goNext}
-          disabled={currentSlide === slideCount - 1}
+          disabled={clampedSlide === slideCount - 1}
           className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           title="Next slide"
         >
@@ -427,14 +428,14 @@ export function PresentationPreview({ content }: PresentationPreviewProps) {
               style={{
                 width: 80,
                 aspectRatio: '16 / 9',
-                border: i === currentSlide ? `2px solid ${hexToCSS(theme.accentColor)}` : '2px solid transparent',
-                opacity: i === currentSlide ? 1 : 0.7,
+                border: i === clampedSlide ? `2px solid ${hexToCSS(theme.accentColor)}` : '2px solid transparent',
+                opacity: i === clampedSlide ? 1 : 0.7,
                 position: 'relative',
               }}
               title={`Slide ${i + 1}${slide.title ? `: ${slide.title}` : ''}`}
             >
               <div style={{ transform: 'scale(0.15)', transformOrigin: 'top left', width: 533, height: 300, position: 'absolute', top: 0, left: 0 }}>
-                <SlideRenderer slide={slide} theme={theme} slideNumber={i + 1} />
+                <SlideRenderer slide={slide} theme={theme} />
               </div>
             </button>
           ))}
