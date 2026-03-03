@@ -14,7 +14,7 @@ import {
   getProjects,
   addUsageRecord,
 } from '@/lib/storage';
-import { mergeSystemPrompts, buildArtifactSystemPrompt, buildCitationSystemPrompt, isArtifactTool, isOpenAIReasoningModel } from '@/lib/providers';
+import { buildArtifactSystemPrompt, buildCitationSystemPrompt, buildEffectiveSystemPrompt, isArtifactTool, isOpenAIReasoningModel } from '@/lib/providers';
 import { getActivePath, getSiblings, getDefaultLeaf, ensureTreeStructure } from '@/lib/conversation-tree';
 import { processStreamingChunk } from '@/lib/artifact-parser';
 import { MAX_TOOL_RECURSION_DEPTH } from '@/lib/constants';
@@ -31,6 +31,7 @@ import { ModelsConfig } from './ModelsConfig';
 import { ConnectorsConfig } from './ConnectorsConfig';
 import { ArtifactPanel } from './ArtifactPanel';
 import { ContextInspector } from './ContextInspector';
+import { SystemPromptInspector } from './SystemPromptInspector';
 import { useTheme } from './ThemeProvider';
 import {
   useArtifacts,
@@ -155,6 +156,7 @@ export function Chat() {
   const [streamingContentBlocks, setStreamingContentBlocks] = useState<ContentBlock[]>([]);
   const [contextBreakdown, setContextBreakdown] = useState<ContextBreakdown | null>(null);
   const [showContextInspector, setShowContextInspector] = useState(false);
+  const [showSystemPromptInspector, setShowSystemPromptInspector] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingMessageRef = useRef<HTMLDivElement>(null);
   const { setTheme } = useTheme();
@@ -478,6 +480,59 @@ export function Chat() {
     [currentProjectId, projects]
   );
 
+  const promptInspectorProject = useMemo(() => {
+    const projectId = currentConversation?.projectId || currentProjectId;
+    return projectId ? projects.find((p) => p.id === projectId) : undefined;
+  }, [currentConversation?.projectId, currentProjectId, projects]);
+
+  const promptInspectorSections = useMemo(() => {
+    const sections: { label: string; content?: string }[] = [
+      { label: 'Global Prompt', content: settings.systemPrompt?.trim() || undefined },
+      { label: 'Project Instructions', content: promptInspectorProject?.instructions?.trim() || undefined },
+      { label: 'Conversation Prompt', content: currentConversation?.systemPrompt?.trim() || undefined },
+    ];
+
+    const artifactPrompt = settings.artifactsEnabled !== false
+      ? buildArtifactSystemPrompt(currentConversation?.artifacts)
+      : undefined;
+    const citationPrompt = buildCitationSystemPrompt(settings.webSearchEnabled, settings.ragEnabled);
+
+    sections.push(
+      { label: 'Artifact Instructions (auto)', content: artifactPrompt },
+      { label: 'Citation Instructions (auto)', content: citationPrompt }
+    );
+
+    return sections;
+  }, [
+    settings.systemPrompt,
+    settings.artifactsEnabled,
+    settings.webSearchEnabled,
+    settings.ragEnabled,
+    promptInspectorProject?.instructions,
+    currentConversation?.systemPrompt,
+    currentConversation?.artifacts,
+  ]);
+
+  const effectiveSystemPrompt = useMemo(() => {
+    return buildEffectiveSystemPrompt({
+      globalPrompt: settings.systemPrompt,
+      projectInstructions: promptInspectorProject?.instructions,
+      conversationPrompt: currentConversation?.systemPrompt,
+      artifactsEnabled: settings.artifactsEnabled,
+      existingArtifacts: currentConversation?.artifacts,
+      webSearchEnabled: settings.webSearchEnabled,
+      ragEnabled: settings.ragEnabled,
+    });
+  }, [
+    settings.systemPrompt,
+    settings.artifactsEnabled,
+    settings.webSearchEnabled,
+    settings.ragEnabled,
+    promptInspectorProject?.instructions,
+    currentConversation?.systemPrompt,
+    currentConversation?.artifacts,
+  ]);
+
   const activeProjectProvider = activeProject?.provider || settings.provider;
   const activeProjectModel = activeProject?.model || settings.model;
   const activeProjectModels = [
@@ -598,27 +653,16 @@ export function Chat() {
         timeoutSignal,
       ]);
 
-      // Merge system prompts: global + project + conversation
-      const baseSystemPrompt = mergeSystemPrompts(
-        settings.systemPrompt,
-        currentProject?.instructions,
-        conv.systemPrompt
-      );
-
-      // Append artifact tool instructions (with list of existing artifacts) when artifacts are enabled
       const allCurrentArtifacts = [...(conv.artifacts || []), ...streamingArtifactsRef.current];
-      const artifactPrompt = (settings.artifactsEnabled !== false)
-        ? buildArtifactSystemPrompt(allCurrentArtifacts.length > 0 ? allCurrentArtifacts : undefined)
-        : undefined;
-      let mergedSystemPrompt = artifactPrompt
-        ? (baseSystemPrompt ? `${baseSystemPrompt}\n\n${artifactPrompt}` : artifactPrompt)
-        : baseSystemPrompt;
-      const citationPrompt = buildCitationSystemPrompt(settings.webSearchEnabled, settings.ragEnabled);
-      if (citationPrompt) {
-        mergedSystemPrompt = mergedSystemPrompt
-          ? `${mergedSystemPrompt}\n\n${citationPrompt}`
-          : citationPrompt;
-      }
+      const mergedSystemPrompt = buildEffectiveSystemPrompt({
+        globalPrompt: settings.systemPrompt,
+        projectInstructions: currentProject?.instructions,
+        conversationPrompt: conv.systemPrompt,
+        artifactsEnabled: settings.artifactsEnabled,
+        existingArtifacts: allCurrentArtifacts.length > 0 ? allCurrentArtifacts : undefined,
+        webSearchEnabled: settings.webSearchEnabled,
+        ragEnabled: settings.ragEnabled,
+      });
 
       // Use active path (not all messages) for the API request
       const messagesWithProjectFiles = activePathForStream.map((m, idx) => {
@@ -1637,41 +1681,52 @@ export function Chat() {
               </span>
             )}
           </div>
-          {!currentProjectId && !showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig && (
+          {!showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig && (
             <div className="flex items-center gap-4">
-              <TokenUsageDisplay
-                sessionUsage={sessionUsage}
-                model={settings.model}
-                hasContextBreakdown={!!contextBreakdown}
-                onOpenContextInspector={() => setShowContextInspector(true)}
-              />
-              <div className="flex items-center gap-2">
-                <select
-                  value={settings.provider}
-                  onChange={(e) => handleProviderChange(e.target.value as Provider)}
-                  className="text-sm px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--background)]"
-                >
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="google">Google (Gemini)</option>
-                  <option value="mistral">Mistral</option>
-                  <option value="cerebras">Cerebras</option>
-                </select>
-                <select
-                  value={settings.model}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                  className="text-sm px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--background)] max-w-[180px]"
-                >
-                  {[
-                    ...DEFAULT_MODELS[settings.provider],
-                    ...(settings.customModels?.[settings.provider] || []),
-                  ].map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <button
+                onClick={() => setShowSystemPromptInspector(true)}
+                className="text-xs px-2.5 py-1.5 rounded border border-[var(--border-color)] hover:bg-[var(--border-color)] transition-colors"
+                title="Inspect the effective system prompt"
+              >
+                Prompt
+              </button>
+              {!currentProjectId && (
+                <>
+                  <TokenUsageDisplay
+                    sessionUsage={sessionUsage}
+                    model={settings.model}
+                    hasContextBreakdown={!!contextBreakdown}
+                    onOpenContextInspector={() => setShowContextInspector(true)}
+                  />
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={settings.provider}
+                      onChange={(e) => handleProviderChange(e.target.value as Provider)}
+                      className="text-sm px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--background)]"
+                    >
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="google">Google (Gemini)</option>
+                      <option value="mistral">Mistral</option>
+                      <option value="cerebras">Cerebras</option>
+                    </select>
+                    <select
+                      value={settings.model}
+                      onChange={(e) => handleModelChange(e.target.value)}
+                      className="text-sm px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--background)] max-w-[180px]"
+                    >
+                      {[
+                        ...DEFAULT_MODELS[settings.provider],
+                        ...(settings.customModels?.[settings.provider] || []),
+                      ].map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </header>
@@ -1855,6 +1910,14 @@ export function Chat() {
           settings={settings}
           onSave={handleSaveSettings}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showSystemPromptInspector && (
+        <SystemPromptInspector
+          prompt={effectiveSystemPrompt}
+          sections={promptInspectorSections}
+          onClose={() => setShowSystemPromptInspector(false)}
         />
       )}
 

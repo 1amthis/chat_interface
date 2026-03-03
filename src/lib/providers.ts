@@ -20,6 +20,7 @@ export {
   generateGeminiToolCallId,
   buildArtifactSystemPrompt,
   buildCitationSystemPrompt,
+  buildEffectiveSystemPrompt,
   isArtifactTool,
   // Tool definitions (for advanced use cases)
   WEB_SEARCH_SCHEMA,

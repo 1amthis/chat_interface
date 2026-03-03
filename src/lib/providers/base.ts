@@ -203,3 +203,48 @@ When creating documents with \`type: "document"\`, output structured JSON:
 
   return prompt;
 }
+
+interface EffectiveSystemPromptOptions {
+  globalPrompt?: string;
+  projectInstructions?: string;
+  conversationPrompt?: string;
+  artifactsEnabled?: boolean;
+  existingArtifacts?: Artifact[];
+  webSearchEnabled?: boolean;
+  ragEnabled?: boolean;
+}
+
+/**
+ * Build the final system prompt exactly as sent to providers.
+ * Includes merged user/project/conversation instructions plus optional
+ * artifact and citation guidance.
+ */
+export function buildEffectiveSystemPrompt(options: EffectiveSystemPromptOptions): string | undefined {
+  const {
+    globalPrompt,
+    projectInstructions,
+    conversationPrompt,
+    artifactsEnabled,
+    existingArtifacts,
+    webSearchEnabled,
+    ragEnabled,
+  } = options;
+
+  const basePrompt = mergeSystemPrompts(globalPrompt, projectInstructions, conversationPrompt);
+  const artifactPrompt = artifactsEnabled !== false
+    ? buildArtifactSystemPrompt(existingArtifacts && existingArtifacts.length > 0 ? existingArtifacts : undefined)
+    : undefined;
+
+  let mergedPrompt = artifactPrompt
+    ? (basePrompt ? `${basePrompt}\n\n${artifactPrompt}` : artifactPrompt)
+    : basePrompt;
+
+  const citationPrompt = buildCitationSystemPrompt(webSearchEnabled, ragEnabled);
+  if (citationPrompt) {
+    mergedPrompt = mergedPrompt
+      ? `${mergedPrompt}\n\n${citationPrompt}`
+      : citationPrompt;
+  }
+
+  return mergedPrompt;
+}
