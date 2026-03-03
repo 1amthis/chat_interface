@@ -1,36 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Opus Chat Interface
 
-## Getting Started
+Multi-provider chat workspace built with Next.js.  
+It combines model chat, tools, projects, artifacts, citations, and token/context inspection in one UI.
 
-First, run the development server:
+## Core Capabilities
+
+- Multi-provider chat: OpenAI, Anthropic, Google (Gemini), Mistral, Cerebras
+- Project-based organization with per-project instructions/files
+- Conversation branching (edit/regenerate without destructive overwrite)
+- Tool execution with live status blocks:
+  - Web search
+  - Google Drive search
+  - Memory search across conversations
+  - Document search (RAG)
+  - MCP server tools and built-in tools
+- Artifact workflow:
+  - Create/update/read artifacts
+  - Artifact library
+  - Multi-format export (`source`, `docx`, `pdf`, `xlsx`, `pptx`)
+- Citation UX for web and document sources (including modal source viewer)
+- Token/context visibility with provider-aware token accounting
+- System prompt inspector and effective prompt composition
+
+## Recent Updates
+
+Based on recent commit history:
+
+- `90637f1` Add chat toolbar tool toggles and tool execution guards
+- `ce49c44` Improve document artifact parsing and export
+- `8931340` Add system prompt inspector
+- `e83dc56` Improve token accounting with provider counts and reasoning/cache usage
+- `825af8e` Fix duplicate citation keys across repeated web/RAG searches
+- `dea3365` Improve citation UX with modal source viewer
+- `4875b28` Improve artifact editing flow and add artifact library
+- `8be9b42` Show connectors/tool catalog with parameter schemas
+- `2ca3041` Add visual tool results for Google Drive, memory search, and RAG
+- `fe7ccbb` Add visual web search results cards
+- `50728e6` Add thinking toggle and provider reasoning handling fixes
+- `b055eb6` Add document/spreadsheet/presentation artifacts with export
+- `6ca00c1` Add SQLite integration and tool-call reliability improvements
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure environment (optional but recommended)
+
+Create `.env.local` from `.env.example`:
+
+```bash
+cp .env.example .env.local
+```
+
+Current env vars are used for Google Drive OAuth:
+
+- `NEXT_PUBLIC_GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `NEXT_PUBLIC_GOOGLE_REDIRECT_URI`
+
+API keys for model providers/search are configured in-app from:
+
+- `Models & Providers` view (provider keys/models)
+- `Connectors` view (search/tool integrations)
+
+### 3. Run locally
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `npm run dev` Start dev server
+- `npm run build` Build production bundle
+- `npm run start` Run production server
+- `npm run lint` Run ESLint
 
-## Learn More
+## MCP Notes
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+For MCP server setup example, see [MCP_SETUP.md](./MCP_SETUP.md).
