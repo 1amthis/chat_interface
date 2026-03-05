@@ -49,13 +49,41 @@ function formatTokenCount(n: number): string {
   return n.toString();
 }
 
+function getDeprecationState(deprecationDate?: string): {
+  isDeprecated: boolean;
+  label: string;
+} | null {
+  if (!deprecationDate) return null;
+  const timestamp = Date.parse(`${deprecationDate}T00:00:00Z`);
+  if (Number.isNaN(timestamp)) return null;
+  const now = Date.now();
+  const formattedDate = new Date(timestamp).toLocaleDateString();
+  if (timestamp <= now) {
+    return { isDeprecated: true, label: `Deprecated since ${formattedDate}` };
+  }
+  return { isDeprecated: false, label: `Deprecates on ${formattedDate}` };
+}
+
 // ── Tooltip component ─────────────────────────────────────
 function ModelTooltip({ meta, modelId }: { meta: ModelMetadata; modelId: string }) {
+  const deprecationState = getDeprecationState(meta.deprecationDate);
+
   return (
     <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 rounded-lg border border-[var(--border-color)] bg-[var(--background)] shadow-xl text-xs space-y-2">
       <div>
         <div className="font-semibold text-sm">{meta.displayName || modelId}</div>
         {meta.description && <div className="text-gray-500 mt-0.5">{meta.description}</div>}
+        {deprecationState && (
+          <div
+            className={`mt-1 text-[11px] ${
+              deprecationState.isDeprecated
+                ? 'text-red-600 dark:text-red-400'
+                : 'text-amber-600 dark:text-amber-400'
+            }`}
+          >
+            {deprecationState.label}
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-gray-600 dark:text-gray-400">
         <span>Context</span>
@@ -234,6 +262,7 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
 
   // Group models by family
   const getGroupedModels = useCallback((
+    provider: Provider,
     models: { id: string; source: 'default' | 'fetched' | 'custom' }[],
     filterStr?: string,
   ): { family: string; models: { id: string; source: 'default' | 'fetched' | 'custom' }[] }[] => {
@@ -242,7 +271,7 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
     if (filterStr) {
       const q = filterStr.toLowerCase();
       filtered = models.filter(m => {
-        const meta = getModelMetadata(m.id);
+        const meta = getModelMetadata(m.id, provider);
         return (
           m.id.toLowerCase().includes(q) ||
           (meta?.displayName?.toLowerCase().includes(q)) ||
@@ -255,7 +284,7 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
     // Check if we need grouping (2+ distinct families)
     const families = new Set<string>();
     for (const m of filtered) {
-      const meta = getModelMetadata(m.id);
+      const meta = getModelMetadata(m.id, provider);
       families.add(meta?.family || 'Other');
     }
 
@@ -266,7 +295,7 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
     // Group by family
     const groups = new Map<string, typeof filtered>();
     for (const m of filtered) {
-      const meta = getModelMetadata(m.id);
+      const meta = getModelMetadata(m.id, provider);
       const fam = meta?.family || 'Other';
       const arr = groups.get(fam) || [];
       arr.push(m);
@@ -490,6 +519,15 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
     return { totalCost: hasAnyCost ? totalCost : null, totalTokens, earliest };
   }, [usageData]);
 
+  const activeModelMeta = useMemo(
+    () => getModelMetadata(settings.model, settings.provider),
+    [settings.model, settings.provider]
+  );
+  const activeMaxOutputLimit = activeModelMeta?.maxOutputTokens;
+  const maxOutputOverLimit = typeof settings.maxOutputTokens === 'number'
+    && typeof activeMaxOutputLimit === 'number'
+    && settings.maxOutputTokens > activeMaxOutputLimit;
+
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8">
       {/* Header */}
@@ -541,7 +579,7 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
               className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)] text-sm"
             >
               {getAvailableModels(settings.provider).map(m => {
-                const meta = getModelMetadata(m.id);
+                const meta = getModelMetadata(m.id, settings.provider);
                 return (
                   <option key={m.id} value={m.id}>
                     {meta?.displayName || m.id}
@@ -549,6 +587,98 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
                 );
               })}
             </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Generation Parameters */}
+      <div className="p-4 rounded-xl border border-[var(--border-color)]">
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h2 className="text-sm font-semibold">Generation Parameters</h2>
+            <p className="text-xs text-gray-500 mt-1">
+              Optional overrides. Leave empty to use provider defaults.
+            </p>
+          </div>
+          <button
+            onClick={() => onSettingsChange({ temperature: undefined, maxOutputTokens: undefined })}
+            className="text-xs px-2 py-1 rounded border border-[var(--border-color)] hover:bg-[var(--border-color)] transition-colors"
+            title="Reset generation parameters to provider defaults"
+          >
+            Reset
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Temperature</label>
+            <input
+              type="number"
+              min={0}
+              max={2}
+              step={0.1}
+              value={settings.temperature ?? ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === '') {
+                  onSettingsChange({ temperature: undefined });
+                  return;
+                }
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed)) return;
+                onSettingsChange({ temperature: Math.min(Math.max(parsed, 0), 2) });
+              }}
+              placeholder="Provider default"
+              className="w-full px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--background)] text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Range: 0 to 2. Note: Anthropic ignores temperature when Extended Thinking is enabled.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Max Output Tokens</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={settings.maxOutputTokens ?? ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === '') {
+                    onSettingsChange({ maxOutputTokens: undefined });
+                    return;
+                  }
+                  const parsed = Math.floor(Number(value));
+                  if (!Number.isFinite(parsed) || parsed < 1) return;
+                  onSettingsChange({ maxOutputTokens: parsed });
+                }}
+                placeholder={activeMaxOutputLimit ? `Model max: ${activeMaxOutputLimit.toLocaleString()}` : 'Provider default'}
+                className="flex-1 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--background)] text-sm"
+              />
+              {activeMaxOutputLimit && (
+                <button
+                  onClick={() => onSettingsChange({ maxOutputTokens: activeMaxOutputLimit })}
+                  className="px-2 py-1.5 rounded-lg border border-[var(--border-color)] hover:bg-[var(--border-color)] transition-colors text-xs"
+                  title="Set to active model max output limit"
+                >
+                  Use Max
+                </button>
+              )}
+            </div>
+            {activeMaxOutputLimit && (
+              <p
+                className={`text-xs mt-1 ${
+                  maxOutputOverLimit
+                    ? 'text-red-500'
+                    : 'text-gray-500'
+                }`}
+              >
+                Active model limit ({activeModelMeta?.displayName || settings.model}): {activeMaxOutputLimit.toLocaleString()} tokens
+                {maxOutputOverLimit ? ' - current override exceeds this limit.' : ''}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -564,7 +694,7 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
           const isValidating = validatingProvider === provider.id;
           const fetchError = fetchErrors[provider.id];
           const filter = modelFilter[provider.id] || '';
-          const grouped = getGroupedModels(models, filter);
+          const grouped = getGroupedModels(provider.id, models, filter);
           const showFilter = models.length > 6;
           const validationStatus = settings.apiKeyValidation?.[provider.id];
 
@@ -692,9 +822,10 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
                       )}
                       <div className="flex flex-wrap gap-1">
                         {group.models.map(m => {
-                          const meta = getModelMetadata(m.id);
+                          const meta = getModelMetadata(m.id, provider.id);
                           const isActive = settings.provider === provider.id && settings.model === m.id;
                           const tierClasses = meta ? getTierColor(meta.tier) : '';
+                          const deprecationState = getDeprecationState(meta?.deprecationDate);
 
                           return (
                             <span
@@ -714,6 +845,16 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
                               onMouseLeave={() => setHoveredModel(null)}
                             >
                               {meta?.displayName || m.id}
+                              {deprecationState && (
+                                <span
+                                  className={`inline-block w-1.5 h-1.5 rounded-full ml-0.5 ${
+                                    deprecationState.isDeprecated
+                                      ? 'bg-red-500'
+                                      : 'bg-amber-500'
+                                  }`}
+                                  title={deprecationState.label}
+                                />
+                              )}
                               {/* Capability icons */}
                               {meta && (
                                 <span className="inline-flex items-center gap-px ml-0.5 opacity-50">
@@ -993,7 +1134,7 @@ export function ModelsConfig({ settings, onSettingsChange, onClose }: ModelsConf
                   </thead>
                   <tbody>
                     {usageData.map(entry => {
-                      const meta = getModelMetadata(entry.model);
+                      const meta = getModelMetadata(entry.model, entry.provider);
                       return (
                         <tr key={`${entry.provider}:${entry.model}`} className="border-b border-[var(--border-color)]/50">
                           <td className="py-1.5 pr-3">

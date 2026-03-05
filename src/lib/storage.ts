@@ -478,7 +478,13 @@ export function getAggregatedUsage(since?: number): AggregatedUsage[] {
   const result = Array.from(map.values());
   // Calculate cost for each aggregation
   for (const entry of result) {
-    entry.estimatedCost = calculateCost(entry.model, entry.inputTokens, entry.outputTokens, entry.cacheReadTokens);
+    entry.estimatedCost = calculateCost(
+      entry.model,
+      entry.inputTokens,
+      entry.outputTokens,
+      entry.cacheReadTokens,
+      entry.provider
+    );
   }
   // Sort by last used, descending
   result.sort((a, b) => b.lastUsed - a.lastUsed);

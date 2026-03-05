@@ -17,8 +17,8 @@ export interface VisionSuggestion {
  * Unknown models (custom models not in metadata) default to true
  * to avoid false-positive "no vision" warnings.
  */
-export function modelSupportsVision(model: string): boolean {
-  const meta = getModelMetadata(model);
+export function modelSupportsVision(model: string, provider?: Provider): boolean {
+  const meta = getModelMetadata(model, provider);
   if (!meta) return true; // assume vision for unknown models
   return meta.capabilities.vision;
 }
@@ -43,13 +43,13 @@ export function getVisionSuggestion(
   customModels?: Partial<Record<Provider, string[]>>,
 ): VisionSuggestion | null {
   // If current model supports vision, no suggestion needed
-  if (modelSupportsVision(currentModel)) return null;
+  if (modelSupportsVision(currentModel, currentProvider)) return null;
 
   // 1. Try same-provider models
   for (const model of availableModels) {
     if (model === currentModel) continue;
-    if (modelSupportsVision(model)) {
-      const meta = getModelMetadata(model);
+    if (modelSupportsVision(model, currentProvider)) {
+      const meta = getModelMetadata(model, currentProvider);
       return {
         provider: currentProvider,
         model,
@@ -67,8 +67,8 @@ export function getVisionSuggestion(
       ...(customModels?.[provider] || []),
     ];
     for (const model of models) {
-      if (modelSupportsVision(model)) {
-        const meta = getModelMetadata(model);
+      if (modelSupportsVision(model, provider)) {
+        const meta = getModelMetadata(model, provider);
         return {
           provider,
           model,

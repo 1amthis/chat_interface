@@ -81,6 +81,7 @@ Open `http://localhost:3000`.
 - `npm run build` Build production bundle
 - `npm run start` Run production server
 - `npm run lint` Run ESLint
+- `npm run sync:litellm-metadata` Refresh `src/lib/litellm-chat-metadata.json` from LiteLLM
 
 ## MCP Notes
 

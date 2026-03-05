@@ -342,8 +342,8 @@ export function ChatInput({
     [attachments],
   );
   const supportsVision = useMemo(
-    () => modelSupportsVision(currentModel),
-    [currentModel],
+    () => modelSupportsVision(currentModel, currentProvider),
+    [currentModel, currentProvider],
   );
   const currentVisionContext = useMemo(
     () => `${currentProvider}:${currentModel}`,

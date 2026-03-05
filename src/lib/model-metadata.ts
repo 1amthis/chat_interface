@@ -2,6 +2,9 @@
  * Model metadata registry — display names, capabilities, pricing, and helpers.
  */
 
+import type { Provider } from '@/types';
+import liteLLMChatMetadata from './litellm-chat-metadata.json';
+
 export type ModelTier = 'flagship' | 'standard' | 'fast' | 'economy';
 
 export interface ModelMetadata {
@@ -21,7 +24,40 @@ export interface ModelMetadata {
     outputPerMillion: number;
     cachedInputPerMillion?: number;
   };
+  deprecationDate?: string;
 }
+
+interface LiteLLMChatModelMetadata {
+  litellm_provider?: string;
+  source?: string;
+  max_input_tokens?: number;
+  max_output_tokens?: number;
+  max_tokens?: number;
+  supports_vision?: boolean;
+  supports_reasoning?: boolean;
+  supports_function_calling?: boolean;
+  supports_tool_choice?: boolean;
+  supports_prompt_caching?: boolean;
+  input_cost_per_token?: number;
+  output_cost_per_token?: number;
+  cache_read_input_token_cost?: number;
+  cache_read_input_cost_per_token?: number;
+  deprecation_date?: string;
+}
+
+const LITELLM_CHAT_METADATA = liteLLMChatMetadata as Record<string, LiteLLMChatModelMetadata>;
+// Snapshot source:
+// https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+
+const KNOWN_PROVIDER_PREFIXES = ['openai/', 'anthropic/', 'gemini/', 'mistral/', 'cerebras/'] as const;
+
+const PROVIDER_PREFIX_CANDIDATES: Record<Provider, readonly string[]> = {
+  openai: [''],
+  anthropic: [''],
+  google: ['', 'gemini/'],
+  mistral: ['', 'mistral/'],
+  cerebras: ['', 'cerebras/'],
+};
 
 /**
  * Metadata for every model in DEFAULT_MODELS (types/index.ts).
@@ -335,8 +371,175 @@ export const MODEL_METADATA: Record<string, ModelMetadata> = {
   },
 };
 
-export function getModelMetadata(modelId: string): ModelMetadata | null {
-  return MODEL_METADATA[modelId] ?? null;
+const modelMetadataCache = new Map<string, ModelMetadata | null>();
+
+function stripKnownProviderPrefix(modelId: string): string {
+  for (const prefix of KNOWN_PROVIDER_PREFIXES) {
+    if (modelId.startsWith(prefix)) {
+      return modelId.slice(prefix.length);
+    }
+  }
+  return modelId;
+}
+
+function buildLookupCandidates(modelId: string, provider?: Provider): string[] {
+  const normalized = modelId.trim();
+  const baseId = stripKnownProviderPrefix(normalized);
+  const candidates = new Set<string>();
+
+  const add = (value: string) => {
+    const next = value.trim();
+    if (!next) return;
+    candidates.add(next);
+  };
+
+  add(normalized);
+  add(baseId);
+
+  if (provider) {
+    for (const prefix of PROVIDER_PREFIX_CANDIDATES[provider]) {
+      if (!prefix) {
+        add(baseId);
+      } else {
+        add(`${prefix}${baseId}`);
+      }
+    }
+  } else {
+    for (const prefix of KNOWN_PROVIDER_PREFIXES) {
+      add(`${prefix}${baseId}`);
+    }
+  }
+
+  return Array.from(candidates);
+}
+
+function inferModelTier(modelId: string): ModelTier {
+  const id = stripKnownProviderPrefix(modelId).toLowerCase();
+
+  if (/(nano|lite|tiny|\b3b\b|\b8b\b)/.test(id)) return 'economy';
+  if (/(mini|small|flash|haiku)/.test(id)) return 'fast';
+  if (/(opus|pro|ultra|120b|70b|235b|a22b)/.test(id)) return 'flagship';
+  return 'standard';
+}
+
+function inferModelFamily(modelId: string): string | undefined {
+  const id = stripKnownProviderPrefix(modelId).toLowerCase();
+
+  if (id.startsWith('gpt-5')) return 'GPT-5';
+  if (id.startsWith('gpt-4.1')) return 'GPT-4.1';
+  if (/^o[134]/.test(id)) return 'o-series';
+
+  if (id.startsWith('claude-opus')) return 'Claude Opus';
+  if (id.startsWith('claude-sonnet')) return 'Claude Sonnet';
+  if (id.startsWith('claude-haiku')) return 'Claude Haiku';
+
+  if (id.startsWith('gemini-')) {
+    const match = id.match(/^gemini-\d+(?:\.\d+)?/);
+    if (match) return `Gemini ${match[0].replace('gemini-', '')}`;
+    return 'Gemini';
+  }
+
+  if (id.startsWith('mistral-')) return 'Mistral';
+  if (id.startsWith('magistral-')) return 'Magistral';
+  if (id.startsWith('codestral')) return 'Codestral';
+  if (id.startsWith('qwen-')) return 'Qwen';
+  if (id.startsWith('llama')) return 'Llama';
+  if (id.startsWith('zai-glm')) return 'GLM';
+
+  return undefined;
+}
+
+function buildFallbackMetadata(
+  modelKey: string,
+  entry: LiteLLMChatModelMetadata
+): ModelMetadata | null {
+  const contextWindow = entry.max_input_tokens ?? entry.max_tokens;
+  if (!contextWindow) return null;
+
+  const inputPerMillion = typeof entry.input_cost_per_token === 'number'
+    ? entry.input_cost_per_token * 1_000_000
+    : undefined;
+  const outputPerMillion = typeof entry.output_cost_per_token === 'number'
+    ? entry.output_cost_per_token * 1_000_000
+    : undefined;
+  const cachedPerToken = entry.cache_read_input_token_cost ?? entry.cache_read_input_cost_per_token;
+  const cachedInputPerMillion = typeof cachedPerToken === 'number'
+    ? cachedPerToken * 1_000_000
+    : undefined;
+
+  const baseModelId = stripKnownProviderPrefix(modelKey);
+
+  return {
+    displayName: baseModelId,
+    contextWindow,
+    maxOutputTokens: entry.max_output_tokens ?? entry.max_tokens,
+    tier: inferModelTier(baseModelId),
+    capabilities: {
+      // Unknown capabilities default to permissive values to avoid false negatives in the UI.
+      vision: entry.supports_vision ?? true,
+      toolUse: entry.supports_function_calling ?? entry.supports_tool_choice ?? true,
+      reasoning: entry.supports_reasoning ?? false,
+    },
+    family: inferModelFamily(baseModelId),
+    pricing: inputPerMillion !== undefined && outputPerMillion !== undefined
+      ? {
+          inputPerMillion,
+          outputPerMillion,
+          ...(cachedInputPerMillion !== undefined ? { cachedInputPerMillion } : {}),
+        }
+      : undefined,
+    deprecationDate: entry.deprecation_date,
+  };
+}
+
+function resolveLiteLLMFallback(modelId: string, provider?: Provider): ModelMetadata | null {
+  const candidates = buildLookupCandidates(modelId, provider);
+  for (const candidate of candidates) {
+    const entry = LITELLM_CHAT_METADATA[candidate];
+    if (!entry) continue;
+    const fallback = buildFallbackMetadata(candidate, entry);
+    if (fallback) return fallback;
+  }
+  return null;
+}
+
+function mergeLocalAndFallbackMetadata(local: ModelMetadata, fallback: ModelMetadata): ModelMetadata {
+  const pricing = local.pricing
+    ? {
+        ...local.pricing,
+        ...(local.pricing.cachedInputPerMillion === undefined && fallback.pricing?.cachedInputPerMillion !== undefined
+          ? { cachedInputPerMillion: fallback.pricing.cachedInputPerMillion }
+          : {}),
+      }
+    : fallback.pricing;
+
+  return {
+    ...local,
+    maxOutputTokens: local.maxOutputTokens ?? fallback.maxOutputTokens,
+    pricing,
+    deprecationDate: local.deprecationDate ?? fallback.deprecationDate,
+  };
+}
+
+export function getModelMetadata(modelId: string, provider?: Provider): ModelMetadata | null {
+  const normalizedId = modelId.trim();
+  if (!normalizedId) return null;
+
+  const cacheKey = `${provider ?? '*'}:${normalizedId}`;
+  if (modelMetadataCache.has(cacheKey)) {
+    return modelMetadataCache.get(cacheKey) ?? null;
+  }
+
+  const strippedId = stripKnownProviderPrefix(normalizedId);
+  const local = MODEL_METADATA[normalizedId] ?? MODEL_METADATA[strippedId] ?? null;
+  const fallback = resolveLiteLLMFallback(normalizedId, provider);
+
+  const merged = local && fallback
+    ? mergeLocalAndFallbackMetadata(local, fallback)
+    : (local ?? fallback);
+
+  modelMetadataCache.set(cacheKey, merged);
+  return merged;
 }
 
 /**
@@ -348,8 +551,9 @@ export function calculateCost(
   inputTokens: number,
   outputTokens: number,
   cacheReadTokens?: number,
+  provider?: Provider,
 ): number | null {
-  const meta = MODEL_METADATA[modelId];
+  const meta = getModelMetadata(modelId, provider);
   if (!meta?.pricing) return null;
 
   const { inputPerMillion, outputPerMillion, cachedInputPerMillion } = meta.pricing;
@@ -386,6 +590,13 @@ export function getTierColor(tier: ModelTier): string {
 }
 
 export function formatContextWindow(tokens: number): string {
-  if (tokens >= 1_000_000) return `${tokens / 1_000_000}M`;
-  return `${tokens / 1_000}K`;
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : Number(millions.toFixed(1))}M`;
+  }
+  if (tokens >= 1_000) {
+    const thousands = tokens / 1_000;
+    return `${Number.isInteger(thousands) ? thousands : Number(thousands.toFixed(1))}K`;
+  }
+  return String(tokens);
 }

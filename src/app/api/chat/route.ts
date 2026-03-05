@@ -164,7 +164,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Build context breakdown for the client
-    const modelMeta = getModelMetadata(settings.model);
+    const modelMeta = getModelMetadata(settings.model, settings.provider);
     const contextWindowSize = modelMeta?.contextWindow || 128_000;
 
     const sections: ContextBreakdownSection[] = [];
