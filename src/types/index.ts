@@ -868,3 +868,26 @@ export interface RichDocument {
   footer?: string;           // Running footer text
   showPageNumbers?: boolean;
 }
+
+// ===== Prompt Library Types =====
+
+export type PromptType = 'system' | 'user';
+
+export interface PromptVersion {
+  id: string;
+  content: string;
+  createdAt: number;
+  message?: string; // optional change description
+}
+
+export interface Prompt {
+  id: string;
+  type: PromptType;
+  title: string;
+  content: string;          // current version
+  description?: string;
+  tags?: string[];
+  versions: PromptVersion[];
+  createdAt: number;
+  updatedAt: number;
+}

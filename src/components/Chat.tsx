@@ -28,6 +28,7 @@ import { KnowledgeBase } from './KnowledgeBase';
 import { ArtifactLibrary } from './ArtifactLibrary';
 import { ModelsConfig } from './ModelsConfig';
 import { ConnectorsConfig } from './ConnectorsConfig';
+import { PromptLibrary } from './PromptLibrary';
 import { ArtifactPanel } from './ArtifactPanel';
 import { ContextInspector } from './ContextInspector';
 import { SystemPromptInspector } from './SystemPromptInspector';
@@ -356,6 +357,8 @@ export function Chat() {
   const [showArtifactLibrary, setShowArtifactLibrary] = useState(false);
   const [showModelsConfig, setShowModelsConfig] = useState(false);
   const [showConnectorsConfig, setShowConnectorsConfig] = useState(false);
+  const [showPromptLibrary, setShowPromptLibrary] = useState(false);
+  const [pendingTemplateText, setPendingTemplateText] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [currentToolCalls, setCurrentToolCalls] = useState<ToolCall[]>([]);
   const [streamingContentBlocks, setStreamingContentBlocks] = useState<ContentBlock[]>([]);
@@ -504,6 +507,7 @@ export function Chat() {
     setShowArtifactLibrary(false);
     setShowModelsConfig(false);
     setShowConnectorsConfig(false);
+    setShowPromptLibrary(false);
     setStreamingContent('');
     resetArtifactPanel();
   }, [resetArtifactPanel]);
@@ -545,6 +549,7 @@ export function Chat() {
       setShowArtifactLibrary(false);
       setShowModelsConfig(false);
       setShowConnectorsConfig(false);
+      setShowPromptLibrary(false);
       setStreamingContent('');
       resetArtifactPanel();
     }
@@ -672,6 +677,7 @@ export function Chat() {
     setShowKnowledgeBase(false);
     setShowModelsConfig(false);
     setShowConnectorsConfig(false);
+    setShowPromptLibrary(false);
     setCurrentConversation(null);
     setCurrentProjectId(null);
     resetArtifactPanel();
@@ -702,6 +708,7 @@ export function Chat() {
     setShowArtifactLibrary(false);
     setShowModelsConfig(false);
     setShowConnectorsConfig(false);
+    setShowPromptLibrary(false);
     setStreamingContent('');
     resetArtifactPanel();
   }, [resetArtifactPanel]);
@@ -1997,9 +2004,11 @@ export function Chat() {
     : -1;
 
   const isMainChatSurface =
-    !showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig;
+    !showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig && !showPromptLibrary;
 
-  const headerTitle = showModelsConfig
+  const headerTitle = showPromptLibrary
+    ? 'Prompt Library'
+    : showModelsConfig
     ? 'Models & Providers'
     : showConnectorsConfig
     ? 'Connectors'
@@ -2036,6 +2045,7 @@ export function Chat() {
           setShowArtifactLibrary(false);
           setShowModelsConfig(false);
           setShowConnectorsConfig(false);
+          setShowPromptLibrary(false);
           setCurrentConversation(null);
           setCurrentProjectId(null);
           resetArtifactPanel();
@@ -2048,6 +2058,7 @@ export function Chat() {
           setShowArtifactLibrary(false);
           setShowKnowledgeBase(false);
           setShowConnectorsConfig(false);
+          setShowPromptLibrary(false);
           setCurrentConversation(null);
           setCurrentProjectId(null);
           resetArtifactPanel();
@@ -2056,6 +2067,17 @@ export function Chat() {
           setShowConnectorsConfig(true);
           setShowArtifactLibrary(false);
           setShowModelsConfig(false);
+          setShowKnowledgeBase(false);
+          setShowPromptLibrary(false);
+          setCurrentConversation(null);
+          setCurrentProjectId(null);
+          resetArtifactPanel();
+        }}
+        onOpenPromptLibrary={() => {
+          setShowPromptLibrary(true);
+          setShowArtifactLibrary(false);
+          setShowModelsConfig(false);
+          setShowConnectorsConfig(false);
           setShowKnowledgeBase(false);
           setCurrentConversation(null);
           setCurrentProjectId(null);
@@ -2113,7 +2135,32 @@ export function Chat() {
         </header>
 
         <main ref={mainRef} className="flex-1 overflow-y-auto relative">
-          {showModelsConfig ? (
+          {showPromptLibrary ? (
+            <PromptLibrary
+              settings={settings}
+              onSettingsChange={(partial) => {
+                const newSettings = { ...settings, ...partial };
+                handleSaveSettings(newSettings);
+              }}
+              onApplySystemPrompt={(content, target) => {
+                if (target === 'global') {
+                  handleSaveSettings({ ...settings, systemPrompt: content });
+                } else if (currentConversation) {
+                  const updated = { ...currentConversation, systemPrompt: content, updatedAt: Date.now() };
+                  setCurrentConversation(updated);
+                  saveConversation(updated);
+                  setConversations(getConversations());
+                }
+                setShowPromptLibrary(false);
+              }}
+              onInsertUserTemplate={(content) => {
+                setShowPromptLibrary(false);
+                setPendingTemplateText(content);
+              }}
+              hasActiveConversation={!!currentConversation}
+              onClose={() => setShowPromptLibrary(false)}
+            />
+          ) : showModelsConfig ? (
             <ModelsConfig
               settings={settings}
               onSettingsChange={(partial) => {
@@ -2242,7 +2289,7 @@ export function Chat() {
           <div ref={messagesEndRef} />
         </main>
 
-        {!currentProjectId && !showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig && (
+        {!currentProjectId && !showKnowledgeBase && !showArtifactLibrary && !showModelsConfig && !showConnectorsConfig && !showPromptLibrary && (
           <div className="relative">
             {/* Scroll to bottom button */}
             {showScrollToBottom && (
@@ -2296,6 +2343,25 @@ export function Chat() {
               thinkingSupported={globalThinkingSupported}
               thinkingEnabled={globalThinkingEnabled}
               onToggleThinking={() => handleToggleThinking(settings.provider, settings.model)}
+              pendingTemplate={pendingTemplateText}
+              onTemplateConsumed={() => setPendingTemplateText(null)}
+              onApplySystemPrompt={(content) => {
+                if (currentConversation) {
+                  const updated = { ...currentConversation, systemPrompt: content, updatedAt: Date.now() };
+                  setCurrentConversation(updated);
+                  saveConversation(updated);
+                  setConversations(getConversations());
+                }
+              }}
+              hasCustomSystemPrompt={!!currentConversation?.systemPrompt}
+              onClearSystemPrompt={() => {
+                if (currentConversation) {
+                  const updated = { ...currentConversation, systemPrompt: undefined, updatedAt: Date.now() };
+                  setCurrentConversation(updated);
+                  saveConversation(updated);
+                  setConversations(getConversations());
+                }
+              }}
             />
           </div>
         )}

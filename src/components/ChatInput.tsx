@@ -2,8 +2,8 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useState, useRef, useEffect, useMemo, useCallback, KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { Attachment, Provider, AskQuestionToolResult, AskQuestionPrompt } from '@/types';
-import { generateId } from '@/lib/storage';
+import { Attachment, Provider, Prompt, AskQuestionToolResult, AskQuestionPrompt } from '@/types';
+import { generateId, getPrompts } from '@/lib/storage';
 import {
   formatFileSize,
   fileToBase64,
@@ -44,6 +44,11 @@ interface ChatInputProps {
   thinkingSupported?: boolean;
   thinkingEnabled?: boolean;
   onToggleThinking?: () => void;
+  pendingTemplate?: string | null;
+  onTemplateConsumed?: () => void;
+  onApplySystemPrompt?: (content: string) => void;
+  hasCustomSystemPrompt?: boolean;
+  onClearSystemPrompt?: () => void;
 }
 
 interface AskQuestionQuickReplyProps {
@@ -211,17 +216,36 @@ export function ChatInput({
   thinkingSupported,
   thinkingEnabled,
   onToggleThinking,
+  pendingTemplate,
+  onTemplateConsumed,
+  onApplySystemPrompt,
+  hasCustomSystemPrompt,
+  onClearSystemPrompt,
 }: ChatInputProps) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [dismissedVisionContext, setDismissedVisionContext] = useState<string | null>(null);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [showPromptPicker, setShowPromptPicker] = useState(false);
+  const [promptSearch, setPromptSearch] = useState('');
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const toolsMenuRef = useRef<HTMLDivElement>(null);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
+  const promptPickerRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
+
+  useEffect(() => {
+    if (pendingTemplate) {
+      setInput(pendingTemplate);
+      onTemplateConsumed?.();
+      textareaRef.current?.focus();
+    }
+  }, [pendingTemplate, onTemplateConsumed]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -229,6 +253,64 @@ export function ChatInput({
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [input]);
+
+  // Load prompts fresh when picker opens
+  useEffect(() => {
+    if (showPromptPicker) {
+      setPrompts(getPrompts());
+      setPromptSearch('');
+    }
+  }, [showPromptPicker]);
+
+  // Click-outside for attach menu
+  useEffect(() => {
+    if (!showAttachMenu) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (attachMenuRef.current && !attachMenuRef.current.contains(target)) {
+        setShowAttachMenu(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowAttachMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showAttachMenu]);
+
+  // Click-outside for prompt picker
+  useEffect(() => {
+    if (!showPromptPicker) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (promptPickerRef.current && !promptPickerRef.current.contains(target)) {
+        setShowPromptPicker(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowPromptPicker(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showPromptPicker]);
 
   useEffect(() => {
     if (!showToolsMenu) return;
@@ -289,6 +371,7 @@ export function ChatInput({
     if (ragEnabled) count += 1;
     if (artifactsEnabled !== false) count += 1;
     if (mcpEnabled) count += 1;
+    if (thinkingEnabled && thinkingSupported) count += 1;
     return count;
   }, [
     webSearchEnabled,
@@ -298,7 +381,40 @@ export function ChatInput({
     ragEnabled,
     artifactsEnabled,
     mcpEnabled,
+    thinkingEnabled,
+    thinkingSupported,
   ]);
+
+  const attachmentContextCount = useMemo(() => {
+    let count = attachments.length;
+    if (hasCustomSystemPrompt) count += 1;
+    return count;
+  }, [attachments.length, hasCustomSystemPrompt]);
+  const filteredPrompts = useMemo(() => {
+    if (!promptSearch) return prompts;
+    const q = promptSearch.toLowerCase();
+    return prompts.filter(
+      (p) =>
+        p.title.toLowerCase().includes(q) ||
+        p.content.toLowerCase().includes(q) ||
+        p.description?.toLowerCase().includes(q) ||
+        p.tags?.some((t) => t.toLowerCase().includes(q))
+    );
+  }, [prompts, promptSearch]);
+
+  const handleSelectPrompt = useCallback(
+    (prompt: Prompt) => {
+      if (prompt.type === 'user') {
+        setInput(prompt.content);
+        textareaRef.current?.focus();
+      } else {
+        onApplySystemPrompt?.(prompt.content);
+      }
+      setShowPromptPicker(false);
+    },
+    [onApplySystemPrompt]
+  );
+
   const artifactsToolsEnabled = artifactsEnabled !== false;
   const handleAskQuestionSubmit = (answer: string) => {
     onSend(answer, []);
@@ -555,7 +671,7 @@ export function ChatInput({
                 type="file"
                 multiple
                 accept={ACCEPTED_FILE_TYPES.join(',')}
-                onChange={handleFileSelect}
+                onChange={(e) => { handleFileSelect(e); setShowAttachMenu(false); }}
                 className="hidden"
               />
               <input
@@ -563,38 +679,131 @@ export function ChatInput({
                 type="file"
                 multiple
                 accept={IMAGE_ACCEPT}
-                onChange={handleFileSelect}
+                onChange={(e) => { handleFileSelect(e); setShowAttachMenu(false); }}
                 className="hidden"
               />
 
-              {/* Paperclip button — all files */}
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading}
-                className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-[var(--border-color)] transition-colors disabled:opacity-50"
-                title="Attach file"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                </svg>
-              </button>
+              {/* Attach menu (files, images, prompts) */}
+              <div className="relative" ref={attachMenuRef}>
+                <button
+                  onClick={() => { setShowAttachMenu((prev) => !prev); setShowPromptPicker(false); }}
+                  disabled={isLoading}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 ${
+                    attachmentContextCount > 0
+                      ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-[var(--border-color)]'
+                  }`}
+                  title="Attach files, images, or prompts"
+                  aria-expanded={showAttachMenu}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span className="hidden sm:inline">Attach</span>
+                  {attachmentContextCount > 0 && (
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--background)]/80 border border-[var(--border-color)]">
+                      {attachmentContextCount}
+                    </span>
+                  )}
+                </button>
 
-              {/* Image button — images only */}
-              <button
-                onClick={() => imageInputRef.current?.click()}
-                disabled={isLoading}
-                className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-[var(--border-color)] transition-colors disabled:opacity-50"
-                title="Attach image"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              </button>
+                {showAttachMenu && !showPromptPicker && (
+                  <div className="absolute left-0 bottom-full mb-2 z-30 w-56 rounded-xl border border-[var(--border-color)] bg-[var(--background)] shadow-xl py-1">
+                    <button
+                      onClick={() => { fileInputRef.current?.click(); setShowAttachMenu(false); }}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-[var(--border-color)]/60 transition-colors"
+                    >
+                      <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      Attach File
+                    </button>
+                    <button
+                      onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-[var(--border-color)]/60 transition-colors"
+                    >
+                      <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      Attach Image
+                    </button>
+                    <div className="my-1 border-t border-[var(--border-color)]" />
+                    <button
+                      onClick={() => { setShowAttachMenu(false); setShowPromptPicker(true); }}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-[var(--border-color)]/60 transition-colors"
+                    >
+                      <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
+                      </svg>
+                      Use Prompt
+                    </button>
+                  </div>
+                )}
+
+                {/* Prompt picker (sub-menu) */}
+                {showPromptPicker && (
+                  <div ref={promptPickerRef} className="absolute left-0 bottom-full mb-2 z-30 w-80 max-h-96 rounded-xl border border-[var(--border-color)] bg-[var(--background)] shadow-xl flex flex-col">
+                    <div className="flex items-center gap-2 p-2 border-b border-[var(--border-color)]">
+                      <button
+                        onClick={() => { setShowPromptPicker(false); setShowAttachMenu(true); }}
+                        className="p-1 rounded hover:bg-[var(--border-color)] transition-colors"
+                        title="Back"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                      <input
+                        type="text"
+                        placeholder="Search prompts..."
+                        value={promptSearch}
+                        onChange={(e) => setPromptSearch(e.target.value)}
+                        className="flex-1 px-3 py-1.5 text-sm rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                      {filteredPrompts.length === 0 ? (
+                        <div className="p-4 text-sm text-[var(--text-secondary)] text-center">
+                          {prompts.length === 0 ? 'No prompts yet. Create one in the Prompt Library.' : 'No matching prompts.'}
+                        </div>
+                      ) : (
+                        filteredPrompts.map((p) => (
+                          <button
+                            key={p.id}
+                            onClick={() => handleSelectPrompt(p)}
+                            className="w-full text-left px-3 py-2.5 hover:bg-[var(--border-color)]/60 transition-colors border-b border-[var(--border-color)] last:border-b-0"
+                          >
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                  p.type === 'system'
+                                    ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                }`}
+                              >
+                                {p.type}
+                              </span>
+                              <span className="text-sm font-medium truncate">{p.title}</span>
+                            </div>
+                            {p.description && (
+                              <p className="text-xs text-[var(--text-secondary)] truncate">{p.description}</p>
+                            )}
+                            <p className="text-xs text-[var(--text-tertiary)] truncate mt-0.5">
+                              {p.content.length > 80 ? p.content.slice(0, 80) + '...' : p.content}
+                            </p>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Divider */}
               <div className="w-px h-5 bg-[var(--border-color)]" />
 
-              {/* Tools menu */}
+              {/* Tools & Thinking menu */}
               <div className="relative" ref={toolsMenuRef}>
                 <button
                   onClick={() => setShowToolsMenu((prev) => !prev)}
@@ -688,29 +897,40 @@ export function ChatInput({
                         <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${mcpEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
                       </span>
                     </button>
+
+                    {thinkingSupported && onToggleThinking && (
+                      <>
+                        <div className="my-1 border-t border-[var(--border-color)]" />
+                        <button
+                          onClick={onToggleThinking}
+                          disabled={isLoading}
+                          className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-sm hover:bg-[var(--border-color)]/60 disabled:opacity-50"
+                        >
+                          <span>Thinking</span>
+                          <span className={`w-9 h-5 rounded-full p-0.5 transition-colors ${thinkingEnabled ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                            <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${thinkingEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                          </span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Divider */}
-              <div className="w-px h-5 bg-[var(--border-color)]" />
-
-              {/* Thinking toggle (only for supported models) */}
-              {thinkingSupported && onToggleThinking && (
+              {/* System prompt indicator */}
+              {hasCustomSystemPrompt && (
                 <button
-                  onClick={onToggleThinking}
-                  disabled={isLoading}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 ${
-                    thinkingEnabled
-                      ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
-                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-[var(--border-color)]'
-                  }`}
-                  title={thinkingEnabled ? 'Thinking enabled' : 'Enable thinking'}
+                  onClick={onClearSystemPrompt}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+                  title="Custom system prompt active. Click to clear."
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
                   </svg>
-                  <span className="hidden sm:inline">Think</span>
+                  <span className="hidden sm:inline">Prompt</span>
+                  <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               )}
 

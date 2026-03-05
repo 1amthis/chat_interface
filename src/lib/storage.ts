@@ -1,4 +1,4 @@
-import { Conversation, ChatSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, Folder, Project, UsageRecord, Provider } from '@/types';
+import { Conversation, ChatSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, Folder, Project, Prompt, UsageRecord, Provider } from '@/types';
 import { calculateCost } from './model-metadata';
 import { STORAGE_LIMITS } from './constants';
 import { getActivePathIds } from './conversation-tree';
@@ -488,4 +488,44 @@ export function getAggregatedUsage(since?: number): AggregatedUsage[] {
 export function clearUsageRecords(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(USAGE_RECORDS_KEY);
+}
+
+// ===== Prompt Library =====
+
+const PROMPTS_KEY = 'chat_prompts';
+
+export function getPrompts(): Prompt[] {
+  if (typeof window === 'undefined') return [];
+  const data = localStorage.getItem(PROMPTS_KEY);
+  return data ? JSON.parse(data) : [];
+}
+
+export function savePrompt(prompt: Prompt): void {
+  const prompts = getPrompts();
+  const index = prompts.findIndex((p) => p.id === prompt.id);
+  if (index >= 0) {
+    prompts[index] = prompt;
+  } else {
+    prompts.unshift(prompt);
+  }
+  localStorage.setItem(PROMPTS_KEY, JSON.stringify(prompts));
+}
+
+export function deletePrompt(id: string): void {
+  const prompts = getPrompts().filter((p) => p.id !== id);
+  localStorage.setItem(PROMPTS_KEY, JSON.stringify(prompts));
+}
+
+export function exportPrompts(): string {
+  return JSON.stringify(getPrompts(), null, 2);
+}
+
+export function importPrompts(jsonData: string): number {
+  const imported: Prompt[] = JSON.parse(jsonData);
+  const existing = getPrompts();
+  const existingIds = new Set(existing.map((p) => p.id));
+  const newPrompts = imported.filter((p) => !existingIds.has(p.id));
+  const merged = [...newPrompts, ...existing];
+  localStorage.setItem(PROMPTS_KEY, JSON.stringify(merged));
+  return newPrompts.length;
 }
