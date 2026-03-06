@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateCSRF } from '@/lib/mcp/server-config';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 export async function POST(request: NextRequest) {
+  if (!validateCSRF(request)) {
+    return NextResponse.json({ error: 'CSRF validation failed' }, { status: 403 });
+  }
+
   try {
     const formData = await request.formData();
     const file = formData.get('file');

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateCSRF } from '@/lib/mcp/server-config';
 import { searchGoogleDrive, refreshAccessToken } from '@/lib/googledrive';
 
+const MAX_DRIVE_QUERY_LENGTH = 500;
+
 export async function POST(request: NextRequest) {
+  if (!validateCSRF(request)) {
+    return NextResponse.json({ error: 'CSRF validation failed' }, { status: 403 });
+  }
+
   try {
     const body = await request.json();
     const { query, accessToken, refreshToken, tokenExpiry } = body as {
@@ -13,6 +20,9 @@ export async function POST(request: NextRequest) {
 
     if (!query) {
       return NextResponse.json({ error: 'Query is required' }, { status: 400 });
+    }
+    if (query.length > MAX_DRIVE_QUERY_LENGTH) {
+      return NextResponse.json({ error: `Query exceeds ${MAX_DRIVE_QUERY_LENGTH} characters` }, { status: 400 });
     }
 
     if (!accessToken) {

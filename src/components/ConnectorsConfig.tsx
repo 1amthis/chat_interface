@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BuiltinToolsConfig, ChatSettings, MCPServerConfig, MCPServerStatus, ToolSource, UnifiedTool } from '@/types';
-import { getGoogleAuthUrl, isGoogleDriveConfigured } from '@/lib/googledrive';
+import { beginGoogleDriveAuthFlow, isGoogleDriveConfigured } from '@/lib/googledrive';
 import {
   CREATE_ARTIFACT_SCHEMA,
   GOOGLE_DRIVE_SCHEMA,
@@ -398,7 +398,7 @@ export function ConnectorsConfig({ settings, onSettingsChange, onClose }: Connec
   };
 
   const handleGoogleDriveConnect = () => {
-    const authUrl = getGoogleAuthUrl();
+    const authUrl = beginGoogleDriveAuthFlow();
     window.location.href = authUrl;
   };
 

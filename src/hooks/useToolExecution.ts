@@ -294,6 +294,7 @@ export function useToolExecution({
           body: JSON.stringify({
             source,
             serverId,
+            mcpServers: source === 'mcp' ? settings.mcpServers : undefined,
             toolName,
             params,
             builtinToolsConfig: settings.builtinTools,
@@ -343,11 +344,11 @@ export function useToolExecution({
 
     console.error('MCP tool call error after all retries:', lastError);
     setSearchStatus(null);
-    return {
+  return {
       result: lastError?.message || 'Tool call failed',
       isError: true,
     };
-  }, [settings.builtinTools, settings.provider]);
+  }, [settings.builtinTools, settings.mcpServers, settings.provider]);
 
   // Perform memory search across previous conversations
   const performMemorySearch = useCallback(async (
@@ -386,10 +387,7 @@ export function useToolExecution({
   ): Promise<{ results: RAGSearchResult[]; formatted: string } | null> => {
     try {
       if (!settings.openaiKey) {
-        return {
-          results: [],
-          formatted: 'RAG search requires an OpenAI API key for embeddings.',
-        };
+        throw new Error('RAG search requires an OpenAI API key for embeddings.');
       }
 
       setSearchStatus(`Searching documents: "${query}"`);
@@ -408,7 +406,7 @@ export function useToolExecution({
     } catch (error) {
       console.error('RAG search error:', error);
       setSearchStatus(null);
-      return null;
+      throw error instanceof Error ? error : new Error('RAG search failed');
     }
   }, [settings.openaiKey, settings.ragSearchLimit, settings.ragSearchMinScore]);
 

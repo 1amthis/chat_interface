@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { validateCSRF } from '@/lib/mcp/server-config';
+
+const MAX_TEXTS_PER_REQUEST = 20;
+const MAX_TEXT_LENGTH = 50_000;
+const MAX_TOTAL_TEXT_LENGTH = 200_000;
 
 export async function POST(request: NextRequest) {
+  if (!validateCSRF(request)) {
+    return NextResponse.json({ error: 'CSRF validation failed' }, { status: 403 });
+  }
+
   try {
     const body = await request.json();
     const { texts, openaiKey } = body as {
@@ -12,9 +21,22 @@ export async function POST(request: NextRequest) {
     if (!texts || !Array.isArray(texts) || texts.length === 0) {
       return NextResponse.json({ error: 'texts array is required' }, { status: 400 });
     }
+    if (texts.length > MAX_TEXTS_PER_REQUEST) {
+      return NextResponse.json({ error: `A maximum of ${MAX_TEXTS_PER_REQUEST} texts is allowed per request` }, { status: 400 });
+    }
 
     if (!openaiKey) {
       return NextResponse.json({ error: 'OpenAI API key is required' }, { status: 400 });
+    }
+
+    const invalidText = texts.find((text) => typeof text !== 'string' || text.length > MAX_TEXT_LENGTH);
+    if (invalidText !== undefined) {
+      return NextResponse.json({ error: `Each text must be a string with at most ${MAX_TEXT_LENGTH} characters` }, { status: 400 });
+    }
+
+    const totalTextLength = texts.reduce((sum, text) => sum + text.length, 0);
+    if (totalTextLength > MAX_TOTAL_TEXT_LENGTH) {
+      return NextResponse.json({ error: `Total text length exceeds ${MAX_TOTAL_TEXT_LENGTH} characters` }, { status: 400 });
     }
 
     const client = new OpenAI({ apiKey: openaiKey });

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateCSRF } from '@/lib/mcp/server-config';
 import { performWebSearch, performBraveSearch, performFallbackSearch } from '@/lib/websearch';
 
+const MAX_QUERY_LENGTH = 500;
+
 export async function POST(request: NextRequest) {
+  if (!validateCSRF(request)) {
+    return NextResponse.json({ error: 'CSRF validation failed' }, { status: 403 });
+  }
+
   try {
     const body = await request.json();
     const { query, tavilyApiKey, braveApiKey } = body as {
@@ -12,6 +19,9 @@ export async function POST(request: NextRequest) {
 
     if (!query) {
       return NextResponse.json({ error: 'Query is required' }, { status: 400 });
+    }
+    if (query.length > MAX_QUERY_LENGTH) {
+      return NextResponse.json({ error: `Query exceeds ${MAX_QUERY_LENGTH} characters` }, { status: 400 });
     }
 
     let result;

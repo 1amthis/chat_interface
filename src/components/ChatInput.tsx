@@ -230,7 +230,6 @@ export function ChatInput({
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showPromptPicker, setShowPromptPicker] = useState(false);
   const [promptSearch, setPromptSearch] = useState('');
-  const [prompts, setPrompts] = useState<Prompt[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -238,14 +237,31 @@ export function ChatInput({
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const promptPickerRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
+  const lastAppliedTemplateRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (pendingTemplate) {
+    if (!pendingTemplate || pendingTemplate === lastAppliedTemplateRef.current) return;
+
+    lastAppliedTemplateRef.current = pendingTemplate;
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
       setInput(pendingTemplate);
       onTemplateConsumed?.();
       textareaRef.current?.focus();
-    }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [pendingTemplate, onTemplateConsumed]);
+
+  useEffect(() => {
+    if (!pendingTemplate) {
+      lastAppliedTemplateRef.current = null;
+    }
+  }, [pendingTemplate]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -253,14 +269,6 @@ export function ChatInput({
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [input]);
-
-  // Load prompts fresh when picker opens
-  useEffect(() => {
-    if (showPromptPicker) {
-      setPrompts(getPrompts());
-      setPromptSearch('');
-    }
-  }, [showPromptPicker]);
 
   // Click-outside for attach menu
   useEffect(() => {
@@ -390,6 +398,10 @@ export function ChatInput({
     if (hasCustomSystemPrompt) count += 1;
     return count;
   }, [attachments.length, hasCustomSystemPrompt]);
+  const prompts = useMemo(
+    () => (showPromptPicker ? getPrompts() : []),
+    [showPromptPicker],
+  );
   const filteredPrompts = useMemo(() => {
     if (!promptSearch) return prompts;
     const q = promptSearch.toLowerCase();
@@ -410,6 +422,7 @@ export function ChatInput({
       } else {
         onApplySystemPrompt?.(prompt.content);
       }
+      setPromptSearch('');
       setShowPromptPicker(false);
     },
     [onApplySystemPrompt]
@@ -686,7 +699,11 @@ export function ChatInput({
               {/* Attach menu (files, images, prompts) */}
               <div className="relative" ref={attachMenuRef}>
                 <button
-                  onClick={() => { setShowAttachMenu((prev) => !prev); setShowPromptPicker(false); }}
+                  onClick={() => {
+                    setShowAttachMenu((prev) => !prev);
+                    setPromptSearch('');
+                    setShowPromptPicker(false);
+                  }}
                   disabled={isLoading}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 ${
                     attachmentContextCount > 0
@@ -729,7 +746,11 @@ export function ChatInput({
                     </button>
                     <div className="my-1 border-t border-[var(--border-color)]" />
                     <button
-                      onClick={() => { setShowAttachMenu(false); setShowPromptPicker(true); }}
+                      onClick={() => {
+                        setPromptSearch('');
+                        setShowAttachMenu(false);
+                        setShowPromptPicker(true);
+                      }}
                       className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-[var(--border-color)]/60 transition-colors"
                     >
                       <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -745,7 +766,11 @@ export function ChatInput({
                   <div ref={promptPickerRef} className="absolute left-0 bottom-full mb-2 z-30 w-80 max-h-96 rounded-xl border border-[var(--border-color)] bg-[var(--background)] shadow-xl flex flex-col">
                     <div className="flex items-center gap-2 p-2 border-b border-[var(--border-color)]">
                       <button
-                        onClick={() => { setShowPromptPicker(false); setShowAttachMenu(true); }}
+                        onClick={() => {
+                          setPromptSearch('');
+                          setShowPromptPicker(false);
+                          setShowAttachMenu(true);
+                        }}
                         className="p-1 rounded hover:bg-[var(--border-color)] transition-colors"
                         title="Back"
                       >

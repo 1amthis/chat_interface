@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { Provider } from '@/types';
+import { validateCSRF } from '@/lib/mcp/server-config';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  if (!validateCSRF(request)) {
+    return NextResponse.json({ valid: false, error: 'CSRF validation failed' }, { status: 403 });
+  }
+
   try {
     const { provider, apiKey } = (await request.json()) as {
       provider: Provider;

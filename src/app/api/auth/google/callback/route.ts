@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { exchangeCodeForTokens } from '@/lib/googledrive';
+import { exchangeCodeForTokens, GOOGLE_DRIVE_OAUTH_STATE_KEY } from '@/lib/googledrive';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
   const error = searchParams.get('error');
+  const state = searchParams.get('state');
+  const expectedState = request.cookies.get(GOOGLE_DRIVE_OAUTH_STATE_KEY)?.value;
 
   if (error) {
     // Redirect back to app with error
@@ -19,8 +21,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
+  if (!state) {
+    const redirectUrl = new URL('/', request.url);
+    redirectUrl.searchParams.set('auth_error', 'Missing OAuth state');
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  if (!expectedState || state !== expectedState) {
+    const redirectUrl = new URL('/', request.url);
+    redirectUrl.searchParams.set('auth_error', 'Invalid OAuth state');
+    const response = NextResponse.redirect(redirectUrl);
+    response.cookies.delete(GOOGLE_DRIVE_OAUTH_STATE_KEY);
+    return response;
+  }
+
   try {
     const tokens = await exchangeCodeForTokens(code);
+    const tokenPayload = JSON.stringify({
+      oauthState: state,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      tokenExpiry: Date.now() + tokens.expiresIn * 1000,
+    }).replace(/</g, '\\u003c');
+    const nonce = crypto.randomUUID().replace(/-/g, '');
 
     // Create a response that will store tokens in localStorage via a client-side script
     // This is because we can't directly access localStorage from the server
@@ -29,7 +52,7 @@ export async function GET(request: NextRequest) {
 <html>
 <head>
   <title>Google Drive Authentication</title>
-  <style>
+  <style nonce="${nonce}">
     body {
       font-family: system-ui, -apple-system, sans-serif;
       display: flex;
@@ -68,8 +91,16 @@ export async function GET(request: NextRequest) {
     <div class="spinner"></div>
     <p>Saving authentication...</p>
   </div>
-  <script>
+  <script nonce="${nonce}">
+    const payload = ${tokenPayload};
     try {
+      const expectedState = sessionStorage.getItem('${GOOGLE_DRIVE_OAUTH_STATE_KEY}');
+      if (!expectedState || expectedState !== payload.oauthState) {
+        sessionStorage.removeItem('${GOOGLE_DRIVE_OAUTH_STATE_KEY}');
+        window.location.replace('/?auth_error=Invalid OAuth state');
+      } else {
+        sessionStorage.removeItem('${GOOGLE_DRIVE_OAUTH_STATE_KEY}');
+
       // Get existing settings from localStorage
       const existingSettings = JSON.parse(localStorage.getItem('chat_settings') || '{}');
 
@@ -77,34 +108,44 @@ export async function GET(request: NextRequest) {
       const updatedSettings = {
         ...existingSettings,
         googleDriveEnabled: true,
-        googleDriveAccessToken: '${tokens.accessToken}',
-        googleDriveRefreshToken: '${tokens.refreshToken}',
-        googleDriveTokenExpiry: ${Date.now() + tokens.expiresIn * 1000},
+        googleDriveAccessToken: payload.accessToken,
+        googleDriveRefreshToken: payload.refreshToken,
+        googleDriveTokenExpiry: payload.tokenExpiry,
       };
 
       // Save updated settings
       localStorage.setItem('chat_settings', JSON.stringify(updatedSettings));
 
       // Redirect to main app
-      window.location.href = '/?auth_success=google_drive';
+        window.location.replace('/?auth_success=google_drive');
+      }
     } catch (e) {
       console.error('Failed to save tokens:', e);
-      window.location.href = '/?auth_error=Failed to save authentication';
+      sessionStorage.removeItem('${GOOGLE_DRIVE_OAUTH_STATE_KEY}');
+      window.location.replace('/?auth_error=Failed to save authentication');
     }
   </script>
 </body>
 </html>
     `;
 
-    return new NextResponse(html, {
+    const response = new NextResponse(html, {
       headers: {
-        'Content-Type': 'text/html',
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store, max-age=0',
+        Pragma: 'no-cache',
+        'Referrer-Policy': 'no-referrer',
+        'Content-Security-Policy': `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
       },
     });
+    response.cookies.delete(GOOGLE_DRIVE_OAUTH_STATE_KEY);
+    return response;
   } catch (error) {
     console.error('OAuth callback error:', error);
     const redirectUrl = new URL('/', request.url);
     redirectUrl.searchParams.set('auth_error', 'Failed to complete authentication');
-    return NextResponse.redirect(redirectUrl);
+    const response = NextResponse.redirect(redirectUrl);
+    response.cookies.delete(GOOGLE_DRIVE_OAUTH_STATE_KEY);
+    return response;
   }
 }

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mcpManager } from '@/lib/mcp/manager';
+import { callMCPTool } from '@/lib/mcp/manager';
 import { executeBuiltinTool } from '@/lib/mcp/builtin-tools';
 import { parseToolName, formatMCPResultForProvider } from '@/lib/mcp/tool-converter';
-import { validateCSRF, builtinToolsConfigSchema } from '@/lib/mcp/server-config';
-import type { BuiltinToolsConfig, Provider } from '@/types';
+import { validateCSRF, builtinToolsConfigSchema, mcpServerConfigArraySchema } from '@/lib/mcp/server-config';
+import type { BuiltinToolsConfig, Provider, MCPServerConfig } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +11,7 @@ interface CallToolRequest {
   // For directly specifying the tool
   source?: 'mcp' | 'builtin';
   serverId?: string;
+  mcpServers?: MCPServerConfig[];
   toolName: string;
   params: Record<string, unknown>;
 
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
   try {
     const body: CallToolRequest = await request.json();
     let { source, serverId, toolName } = body;
-    const { params } = body;
+    const { params, mcpServers } = body;
     const { prefixedToolName, builtinToolsConfig, provider } = body;
 
     // Parse prefixed tool name if provided
@@ -73,7 +74,22 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      result = await mcpManager.callTool(serverId, toolName, params || {});
+      if (!mcpServers) {
+        return NextResponse.json(
+          { error: 'MCP server configuration is required for MCP tools' },
+          { status: 400 }
+        );
+      }
+
+      const serverValidation = mcpServerConfigArraySchema.safeParse(mcpServers);
+      if (!serverValidation.success) {
+        return NextResponse.json(
+          { error: 'Invalid MCP server configuration', details: serverValidation.error.format() },
+          { status: 400 }
+        );
+      }
+
+      result = await callMCPTool(serverValidation.data, serverId, toolName, params || {});
     } else if (source === 'builtin') {
       if (!builtinToolsConfig) {
         return NextResponse.json(

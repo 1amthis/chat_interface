@@ -220,9 +220,13 @@ const execFileAsync = promisify(execFile);
 /** Shell metacharacters that indicate command injection attempts */
 const SHELL_METACHARACTERS = /[;|&$`(){}<>\n\\]/;
 
+function hasNonEmptyList(values?: string[]): values is string[] {
+  return Array.isArray(values) && values.length > 0;
+}
+
 function isPathAllowed(targetPath: string, allowedPaths: string[]): boolean {
-  if (allowedPaths.length === 0) {
-    return true; // No restrictions
+  if (!hasNonEmptyList(allowedPaths)) {
+    return false;
   }
 
   try {
@@ -883,8 +887,11 @@ export async function shellExecute(
 
 export function getBuiltinTools(config: BuiltinToolsConfig): UnifiedTool[] {
   const tools: UnifiedTool[] = [];
+  const filesystemEnabled = config.filesystem?.enabled && hasNonEmptyList(config.filesystem.allowedPaths);
+  const shellEnabled = config.shell?.enabled && hasNonEmptyList(config.shell.allowedCommands);
+  const sqliteEnabled = config.sqlite?.enabled && typeof config.sqlite.databasePath === 'string' && config.sqlite.databasePath.length > 0;
 
-  if (config.filesystem?.enabled) {
+  if (filesystemEnabled) {
     tools.push({
       source: 'builtin',
       name: 'filesystem_read',
@@ -948,7 +955,7 @@ export function getBuiltinTools(config: BuiltinToolsConfig): UnifiedTool[] {
     });
   }
 
-  if (config.shell?.enabled) {
+  if (shellEnabled) {
     tools.push({
       source: 'builtin',
       name: 'shell_execute',
@@ -967,7 +974,7 @@ export function getBuiltinTools(config: BuiltinToolsConfig): UnifiedTool[] {
     });
   }
 
-  if (config.sqlite?.enabled) {
+  if (sqliteEnabled) {
     tools.push({
       source: 'builtin',
       name: 'execute_sql',

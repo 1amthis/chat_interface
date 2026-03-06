@@ -182,7 +182,7 @@ export function MCPSettingsSection({
             {builtinTools.filesystem?.enabled && (
               <div className="ml-6">
                 <label className="block text-xs text-gray-500 mb-1">
-                  Allowed paths (one per line, empty = all)
+                  Allowed paths (one per line, required)
                 </label>
                 <textarea
                   value={builtinTools.filesystem?.allowedPaths?.join('\n') || ''}

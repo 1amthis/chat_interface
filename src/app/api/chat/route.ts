@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server';
 import { streamChat, ChatMessage, ToolExecutionResult } from '@/lib/providers';
 import { ChatSettings, WebSearchResponse, GoogleDriveSearchResponse, UnifiedTool, ContextBreakdown, ContextBreakdownSection } from '@/types';
-import { mcpManager } from '@/lib/mcp/manager';
+import { getMCPStatusAndTools } from '@/lib/mcp/manager';
 import { getBuiltinTools } from '@/lib/mcp/builtin-tools';
+import { builtinToolsConfigSchema, mcpServerConfigArraySchema, validateCSRF } from '@/lib/mcp/server-config';
 import { estimateTokens, countInputTokensWithProviderAPI } from '@/lib/token-estimation';
 import { getModelMetadata } from '@/lib/model-metadata';
 
@@ -115,6 +116,13 @@ function rescaleSectionsToTotal(sections: ContextBreakdownSection[], targetTotal
 }
 
 export async function POST(request: NextRequest) {
+  if (!validateCSRF(request)) {
+    return new Response(JSON.stringify({ error: 'CSRF validation failed' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     const body = await request.json();
     const {
@@ -147,20 +155,26 @@ export async function POST(request: NextRequest) {
     const mcpTools: UnifiedTool[] = [];
 
     if (settings.mcpEnabled) {
-      // Update MCP configuration if servers are configured
       if (settings.mcpServers && settings.mcpServers.length > 0) {
-        await mcpManager.updateConfig(settings.mcpServers);
+        const mcpValidation = mcpServerConfigArraySchema.safeParse(settings.mcpServers);
+        if (mcpValidation.success) {
+          const { tools } = await getMCPStatusAndTools(mcpValidation.data);
+          mcpTools.push(...tools);
+        } else {
+          console.warn('[chat/route] Ignoring invalid MCP server configuration');
+        }
       }
-
-      // Get available MCP tools
-      const serverTools = await mcpManager.getAvailableTools();
-      mcpTools.push(...serverTools);
     }
 
     // Always load builtin tools regardless of mcpEnabled (SQLite, filesystem, etc. are independent)
     if (settings.builtinTools) {
-      const builtinTools = getBuiltinTools(settings.builtinTools);
-      mcpTools.push(...builtinTools);
+      const builtinValidation = builtinToolsConfigSchema.safeParse(settings.builtinTools);
+      if (builtinValidation.success) {
+        const builtinTools = getBuiltinTools(builtinValidation.data);
+        mcpTools.push(...builtinTools);
+      } else {
+        console.warn('[chat/route] Ignoring invalid built-in tools configuration');
+      }
     }
 
     // Build context breakdown for the client

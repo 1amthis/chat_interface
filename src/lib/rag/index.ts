@@ -135,31 +135,26 @@ export async function searchRAG(
     return [];
   }
 
-  try {
-    const [queryEmbedding, chunks, documents] = await Promise.all([
-      embedQuery(query, openaiKey),
-      getAllChunks(),
-      getAllDocuments(),
-    ]);
+  const [queryEmbedding, chunks, documents] = await Promise.all([
+    embedQuery(query, openaiKey),
+    getAllChunks(),
+    getAllDocuments(),
+  ]);
 
-    if (chunks.length === 0) {
-      return [];
-    }
-
-    // Build document name lookup
-    const documentNames = new Map<string, string>();
-    for (const doc of documents) {
-      documentNames.set(doc.id, doc.name);
-    }
-
-    return searchChunks(queryEmbedding, chunks, documentNames, {
-      limit: options?.limit ?? 5,
-      minScore: options?.minScore,
-    });
-  } catch (error) {
-    console.error('RAG search error:', error);
+  if (chunks.length === 0) {
     return [];
   }
+
+  // Build document name lookup
+  const documentNames = new Map<string, string>();
+  for (const doc of documents) {
+    documentNames.set(doc.id, doc.name);
+  }
+
+  return searchChunks(queryEmbedding, chunks, documentNames, {
+    limit: options?.limit ?? 5,
+    minScore: options?.minScore,
+  });
 }
 
 /**

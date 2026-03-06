@@ -41,7 +41,7 @@ export const builtinToolsConfigSchema = z.object({
 });
 
 /**
- * Check if the request origin matches localhost or the app host.
+ * Check that the browser-originating request is same-origin with this route.
  * Returns true if the request passes CSRF validation.
  */
 export function validateCSRF(request: Request): boolean {
@@ -57,15 +57,9 @@ export function validateCSRF(request: Request): boolean {
   }
 
   try {
-    const url = new URL(source);
-    const hostname = url.hostname;
-    // Allow localhost and common local development hostnames
-    return (
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname === '::1' ||
-      hostname === '0.0.0.0'
-    );
+    const sourceOrigin = new URL(source).origin;
+    const requestOrigin = new URL(request.url).origin;
+    return sourceOrigin === requestOrigin;
   } catch {
     return false;
   }

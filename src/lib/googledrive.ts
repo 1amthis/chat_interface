@@ -9,6 +9,7 @@ const GOOGLE_REDIRECT_URI = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI || 'http
 // Google Drive API endpoints
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
 const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+export const GOOGLE_DRIVE_OAUTH_STATE_KEY = 'google_drive_oauth_state';
 
 // Scopes needed for Drive search
 export const GOOGLE_DRIVE_SCOPES = [
@@ -17,7 +18,7 @@ export const GOOGLE_DRIVE_SCOPES = [
 ];
 
 // Generate OAuth authorization URL
-export function getGoogleAuthUrl(): string {
+export function getGoogleAuthUrl(state?: string): string {
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: GOOGLE_REDIRECT_URI,
@@ -27,7 +28,23 @@ export function getGoogleAuthUrl(): string {
     prompt: 'consent',
   });
 
+  if (state) {
+    params.set('state', state);
+  }
+
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+}
+
+export function beginGoogleDriveAuthFlow(): string {
+  if (typeof window === 'undefined') {
+    return getGoogleAuthUrl();
+  }
+
+  const state = crypto.randomUUID();
+  window.sessionStorage.setItem(GOOGLE_DRIVE_OAUTH_STATE_KEY, state);
+  const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${GOOGLE_DRIVE_OAUTH_STATE_KEY}=${encodeURIComponent(state)}; Path=/; SameSite=Lax${secureFlag}`;
+  return getGoogleAuthUrl(state);
 }
 
 // Exchange authorization code for tokens

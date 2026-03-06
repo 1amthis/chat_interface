@@ -121,6 +121,7 @@ export function KnowledgeBase({
   const [ragStats, setRagStats] = useState<{ documentCount: number; chunkCount: number } | null>(null);
   const [ragSearchQuery, setRagSearchQuery] = useState('');
   const [ragSearchResults, setRagSearchResults] = useState<RAGSearchResult[] | null>(null);
+  const [ragSearchError, setRagSearchError] = useState<string | null>(null);
   const [ragSearching, setRagSearching] = useState(false);
   const [showRagParams, setShowRagParams] = useState(false);
 
@@ -217,6 +218,7 @@ export function KnowledgeBase({
     if (!ragSearchQuery.trim()) return;
     if (!settings.openaiKey) return;
     setRagSearching(true);
+    setRagSearchError(null);
     try {
       const results = await searchRAG(ragSearchQuery, settings.openaiKey, {
         limit: ragLimit,
@@ -225,7 +227,8 @@ export function KnowledgeBase({
       setRagSearchResults(results);
     } catch (e) {
       console.error('RAG search failed:', e);
-      setRagSearchResults([]);
+      setRagSearchResults(null);
+      setRagSearchError(e instanceof Error ? e.message : 'RAG search failed');
     } finally {
       setRagSearching(false);
     }
@@ -611,17 +614,24 @@ export function KnowledgeBase({
                       placeholder="Search uploaded documents..."
                       className="flex-1 px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--background)] focus:outline-none focus:ring-2 focus:ring-green-500"
                     />
-                    <button
-                      onClick={handleRagSearch}
-                      disabled={ragSearching || !ragSearchQuery.trim()}
-                      className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
-                    >
-                      {ragSearching ? <Spinner /> : 'Search'}
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleRagSearch}
+                    disabled={ragSearching || !ragSearchQuery.trim()}
+                    className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
+                  >
+                    {ragSearching ? <Spinner /> : 'Search'}
+                  </button>
+                </div>
 
-                  {/* RAG Search Results */}
-                  {ragSearchResults !== null && (
+                {ragSearchError && (
+                  <div className="p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
+                    <p className="text-sm font-medium text-red-800 dark:text-red-300">Search failed</p>
+                    <p className="text-xs text-red-700 dark:text-red-300">{ragSearchError}</p>
+                  </div>
+                )}
+
+                {/* RAG Search Results */}
+                {ragSearchResults !== null && (
                     <div className="space-y-2">
                       {ragSearchResults.length === 0 ? (
                         <p className="text-sm text-gray-500 py-4 text-center">No results found</p>

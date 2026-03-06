@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { validateCSRF } from '@/lib/mcp/server-config';
 
 export const dynamic = 'force-dynamic';
+const MAX_IMPORT_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+const ALLOWED_DB_EXTENSIONS = new Set(['.db', '.sqlite', '.sqlite3']);
+const SQLITE_IMPORT_ALLOWED_ROOTS = [
+  path.resolve(process.cwd()),
+  path.resolve(os.tmpdir()),
+];
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const XLSX = require('xlsx') as typeof import('xlsx');
@@ -31,6 +38,39 @@ function toSqliteValue(v: unknown): string | number | null {
   return String(v);
 }
 
+function isWithinAllowedRoot(targetPath: string): boolean {
+  return SQLITE_IMPORT_ALLOWED_ROOTS.some((root) => (
+    targetPath === root || targetPath.startsWith(root + path.sep)
+  ));
+}
+
+function isOutputPathAllowed(outputPath: string): boolean {
+  const normalizedOutput = path.resolve(outputPath);
+  if (!isWithinAllowedRoot(normalizedOutput)) {
+    return false;
+  }
+
+  if (fs.existsSync(normalizedOutput)) {
+    try {
+      const existingTarget = fs.lstatSync(normalizedOutput);
+      if (existingTarget.isSymbolicLink()) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  const parentDir = path.dirname(normalizedOutput);
+  try {
+    fs.mkdirSync(parentDir, { recursive: true });
+    const resolvedParent = fs.realpathSync(parentDir);
+    return isWithinAllowedRoot(resolvedParent);
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(request: NextRequest) {
   if (!validateCSRF(request)) {
     return NextResponse.json({ error: 'CSRF validation failed' }, { status: 403 });
@@ -47,25 +87,34 @@ export async function POST(request: NextRequest) {
   const outputPath = (formData.get('outputPath') as string | null)?.trim();
 
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+  if (file.size > MAX_IMPORT_FILE_SIZE) {
+    return NextResponse.json({ error: 'File exceeds 25MB limit' }, { status: 400 });
+  }
   if (!outputPath) return NextResponse.json({ error: 'No output path provided' }, { status: 400 });
   if (!path.isAbsolute(outputPath)) {
     return NextResponse.json({ error: 'Output path must be absolute (e.g. /home/user/data.db)' }, { status: 400 });
   }
-
-  try {
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  } catch (err) {
+  if (!ALLOWED_DB_EXTENSIONS.has(path.extname(outputPath).toLowerCase())) {
     return NextResponse.json(
-      { error: `Cannot create directory: ${err instanceof Error ? err.message : String(err)}` },
+      { error: 'Output path must end with .db, .sqlite, or .sqlite3' },
+      { status: 400 }
+    );
+  }
+  if (!isOutputPathAllowed(outputPath)) {
+    return NextResponse.json(
+      {
+        error: `Output path must stay within ${SQLITE_IMPORT_ALLOWED_ROOTS.join(' or ')}`,
+      },
       { status: 400 }
     );
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
+  let db: import('better-sqlite3').Database | null = null;
 
   try {
     const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-    const db = new BetterSqlite3(outputPath);
+    db = new BetterSqlite3(path.resolve(outputPath));
 
     const results: { tableName: string; rowCount: number; columns: number }[] = [];
 
@@ -110,12 +159,17 @@ export async function POST(request: NextRequest) {
       results.push({ tableName, rowCount: rows.length, columns: origCols.length });
     }
 
-    db.close();
     return NextResponse.json({ success: true, outputPath, tables: results });
   } catch (err) {
     return NextResponse.json(
       { error: `Conversion failed: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 }
     );
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // Ignore close failures during error handling
+    }
   }
 }
