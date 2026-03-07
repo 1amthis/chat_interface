@@ -2149,6 +2149,19 @@ export function Chat() {
     : currentProjectId
     ? projects.find(p => p.id === currentProjectId)?.name || 'Project'
     : (currentConversation?.title || 'New chat');
+  const sidebarActiveView = showSettings
+    ? 'settings'
+    : showPromptLibrary
+    ? 'prompt-library'
+    : showModelsConfig
+    ? 'models'
+    : showConnectorsConfig
+    ? 'connectors'
+    : showArtifactLibrary
+    ? 'artifact-library'
+    : showKnowledgeBase
+    ? 'knowledge-base'
+    : 'chat';
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--chat-bg)]">
@@ -2223,6 +2236,7 @@ export function Chat() {
         }}
         mobileOpen={isSidebarOpen}
         onCloseMobile={() => setIsSidebarOpen(false)}
+        activeView={sidebarActiveView}
       />
 
       <div
