@@ -373,8 +373,8 @@ export function ChatMessage({
           {isUser ? 'U' : 'A'}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-sm mb-1 flex items-center justify-between">
-            <span className="flex items-center gap-2">
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-sm font-medium">
+            <span className="flex min-w-0 items-center gap-2">
               {isUser ? 'You' : 'Assistant'}
               {siblingCount !== undefined && siblingIndex !== undefined && onSwitchBranch && (
                 <BranchNavigator
@@ -387,7 +387,7 @@ export function ChatMessage({
             </span>
 
             {/* Action buttons - show on hover */}
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
               {isUser && onEdit && !isEditing && (
                 <ActionButton onClick={() => setIsEditing(true)} title="Edit message" disabled={isLoading}>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

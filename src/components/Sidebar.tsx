@@ -27,6 +27,8 @@ interface SidebarProps {
   onOpenModelsConfig: () => void;
   onOpenConnectorsConfig: () => void;
   onOpenPromptLibrary: () => void;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export function Sidebar({
@@ -52,6 +54,8 @@ export function Sidebar({
   onOpenModelsConfig,
   onOpenConnectorsConfig,
   onOpenPromptLibrary,
+  mobileOpen = false,
+  onCloseMobile,
 }: SidebarProps) {
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -60,8 +64,8 @@ export function Sidebar({
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
   const [editingProjectSettings, setEditingProjectSettings] = useState<{ id: string; name: string; instructions: string; files: ProjectFile[]; provider?: Provider; model?: string } | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ conversationId: string; x: number; y: number } | null>(null);
-  const [moveDropdownId, setMoveDropdownId] = useState<string | null>(null);
+  const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
+  const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [storagePercentage, setStoragePercentage] = useState(0);
@@ -122,12 +126,9 @@ export function Sidebar({
     setEditingProjectName('');
   };
 
-  const handleContextMenu = (e: React.MouseEvent, conversationId: string) => {
-    e.preventDefault();
-    setContextMenu({ conversationId, x: e.clientX, y: e.clientY });
+  const closeMobile = () => {
+    onCloseMobile?.();
   };
-
-  const closeContextMenu = () => setContextMenu(null);
 
   // Group filtered conversations by project
   const unprojectConversations = filteredConversations.filter((c) => !c.projectId);
@@ -144,8 +145,10 @@ export function Sidebar({
           ? 'bg-[var(--border-color)]'
           : 'hover:bg-[var(--border-color)]/50'
       }`}
-      onClick={() => onSelect(conv.id)}
-      onContextMenu={(e) => handleContextMenu(e, conv.id)}
+      onClick={() => {
+        onSelect(conv.id);
+        closeMobile();
+      }}
     >
       <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
@@ -160,30 +163,33 @@ export function Sidebar({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            setMoveDropdownId(moveDropdownId === conv.id ? null : conv.id);
+            setConversationMenuId(conversationMenuId === conv.id ? null : conv.id);
           }}
-          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-blue-500/20 rounded transition-opacity"
-          title="Move to project"
+          className="p-1.5 rounded text-gray-500 hover:text-[var(--foreground)] hover:bg-[var(--border-color)] transition-colors"
+          title="Conversation options"
+          aria-label={`Options for ${conv.title}`}
+          aria-expanded={conversationMenuId === conv.id}
+          aria-haspopup="menu"
         >
-          <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={2}
-              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+              d="M12 6.75a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5zm0 6.5a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5zm0 6.5a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5z"
             />
           </svg>
         </button>
-        {moveDropdownId === conv.id && (
+        {conversationMenuId === conv.id && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setMoveDropdownId(null)} />
-            <div className="absolute right-0 top-full mt-1 z-50 bg-[var(--background)] border border-[var(--border-color)] rounded-lg shadow-lg py-1 min-w-[150px]">
+            <div className="fixed inset-0 z-40" onClick={() => setConversationMenuId(null)} />
+            <div className="absolute right-0 top-full mt-1 z-50 bg-[var(--background)] border border-[var(--border-color)] rounded-lg shadow-lg py-1 min-w-[190px]">
               <div className="px-3 py-1 text-xs text-gray-500 font-medium">Move to project</div>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onMoveToProject(conv.id, undefined);
-                  setMoveDropdownId(null);
+                  setConversationMenuId(null);
                 }}
                 className={`w-full px-3 py-1.5 text-sm text-left hover:bg-[var(--border-color)] flex items-center gap-2 ${!conv.projectId ? 'bg-[var(--border-color)]/50' : ''}`}
               >
@@ -198,7 +204,7 @@ export function Sidebar({
                   onClick={(e) => {
                     e.stopPropagation();
                     onMoveToProject(conv.id, project.id);
-                    setMoveDropdownId(null);
+                    setConversationMenuId(null);
                   }}
                   className={`w-full px-3 py-1.5 text-sm text-left hover:bg-[var(--border-color)] flex items-center gap-2 ${conv.projectId === project.id ? 'bg-[var(--border-color)]/50' : ''}`}
                 >
@@ -206,34 +212,60 @@ export function Sidebar({
                   {project.name}
                 </button>
               ))}
+              <div className="my-1 border-t border-[var(--border-color)]" />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(conv.id);
+                  setConversationMenuId(null);
+                }}
+                className="w-full px-3 py-1.5 text-sm text-left hover:bg-red-500/10 text-red-600 flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+                Delete conversation
+              </button>
             </div>
           </>
         )}
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(conv.id);
-        }}
-        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded transition-opacity"
-      >
-        <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-          />
-        </svg>
-      </button>
     </div>
   );
 
   return (
-    <div className="w-64 h-screen bg-[var(--sidebar-bg)] border-r border-[var(--border-color)] flex flex-col">
+    <div
+      className={`fixed inset-y-0 left-0 z-40 flex h-full w-[min(20rem,calc(100vw-1.5rem))] flex-col border-r border-[var(--border-color)] bg-[var(--sidebar-bg)] transition-transform duration-200 md:static md:z-0 md:h-screen md:w-64 ${
+        mobileOpen ? 'translate-x-0 shadow-2xl md:shadow-none' : '-translate-x-full md:translate-x-0'
+      }`}
+    >
+      <div className="md:hidden flex items-center justify-between px-3 py-3 border-b border-[var(--border-color)]">
+        <div>
+          <p className="text-sm font-semibold">Workspace</p>
+          <p className="text-xs text-gray-500">Chats, projects, and settings</p>
+        </div>
+        <button
+          onClick={closeMobile}
+          className="p-1.5 rounded-lg hover:bg-[var(--border-color)] transition-colors"
+          aria-label="Close sidebar"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
       <div className="p-3 space-y-2">
         <button
-          onClick={onNew}
+          onClick={() => {
+            onNew();
+            closeMobile();
+          }}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border-color)] hover:bg-[var(--border-color)] transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -345,7 +377,10 @@ export function Sidebar({
                 <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
               </svg>
               <div
-                onClick={() => onSelectProject(project.id)}
+                onClick={() => {
+                  onSelectProject(project.id);
+                  closeMobile();
+                }}
                 className="w-3 h-3 rounded-sm cursor-pointer"
                 style={{ backgroundColor: project.color }}
               />
@@ -368,70 +403,106 @@ export function Sidebar({
                 />
               ) : (
                 <span
-                  onClick={() => onSelectProject(project.id)}
+                  onClick={() => {
+                    onSelectProject(project.id);
+                    closeMobile();
+                  }}
                   className="flex-1 truncate text-sm font-medium cursor-pointer hover:opacity-80"
                 >
                   {project.name}
                 </span>
               )}
               <span className="text-xs text-gray-500">{conversationsByProject[project.id]?.length || 0}</span>
-              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1">
+              <div className="relative">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onNewInProject(project.id);
+                    setProjectMenuId(projectMenuId === project.id ? null : project.id);
                   }}
-                  className="p-0.5 hover:bg-green-500/20 text-green-600 rounded"
-                  title="New conversation in project"
+                  className="p-1.5 rounded text-gray-500 hover:text-[var(--foreground)] hover:bg-[var(--border-color)] transition-colors"
+                  title="Project options"
+                  aria-label={`Options for ${project.name}`}
+                  aria-expanded={projectMenuId === project.id}
+                  aria-haspopup="menu"
                 >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 6.75a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5zm0 6.5a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5zm0 6.5a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5z"
+                    />
                   </svg>
                 </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingProjectSettings({
-                      id: project.id,
-                      name: project.name,
-                      instructions: project.instructions || '',
-                      files: project.files || [],
-                      provider: project.provider,
-                      model: project.model,
-                    });
-                  }}
-                  className="p-0.5 hover:bg-[var(--border-color)] rounded"
-                  title="Project settings"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingProjectId(project.id);
-                    setEditingProjectName(project.name);
-                  }}
-                  className="p-0.5 hover:bg-[var(--border-color)] rounded"
-                  title="Rename project"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteProject(project.id);
-                  }}
-                  className="p-0.5 hover:bg-red-500/20 rounded"
-                  title="Delete project"
-                >
-                  <svg className="w-3 h-3 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
+                {projectMenuId === project.id && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setProjectMenuId(null)} />
+                    <div className="absolute right-0 top-full mt-1 z-50 bg-[var(--background)] border border-[var(--border-color)] rounded-lg shadow-lg py-1 min-w-[190px]">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNewInProject(project.id);
+                          setProjectMenuId(null);
+                          closeMobile();
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--border-color)] flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        New conversation
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingProjectSettings({
+                            id: project.id,
+                            name: project.name,
+                            instructions: project.instructions || '',
+                            files: project.files || [],
+                            provider: project.provider,
+                            model: project.model,
+                          });
+                          setProjectMenuId(null);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--border-color)] flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        Project settings
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingProjectId(project.id);
+                          setEditingProjectName(project.name);
+                          setProjectMenuId(null);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--border-color)] flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Rename project
+                      </button>
+                      <div className="my-1 border-t border-[var(--border-color)]" />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteProject(project.id);
+                          setProjectMenuId(null);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-red-500/10 text-red-600 flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Delete project
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
             {expandedProjects.has(project.id) && (
@@ -465,44 +536,6 @@ export function Sidebar({
           </div>
         )}
       </div>
-
-      {/* Context Menu for moving to folder */}
-      {contextMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={closeContextMenu} />
-          <div
-            className="fixed z-50 bg-[var(--background)] border border-[var(--border-color)] rounded-lg shadow-lg py-1 min-w-[150px]"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-          >
-            <div className="px-3 py-1 text-xs text-gray-500 font-medium">Move to project</div>
-            <button
-              onClick={() => {
-                onMoveToProject(contextMenu.conversationId, undefined);
-                closeContextMenu();
-              }}
-              className="w-full px-3 py-1.5 text-sm text-left hover:bg-[var(--border-color)] flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-              None
-            </button>
-            {projects.map((project) => (
-              <button
-                key={project.id}
-                onClick={() => {
-                  onMoveToProject(contextMenu.conversationId, project.id);
-                  closeContextMenu();
-                }}
-                className="w-full px-3 py-1.5 text-sm text-left hover:bg-[var(--border-color)] flex items-center gap-2"
-              >
-                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: project.color }} />
-                {project.name}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
 
       {/* Project Settings Modal */}
       {editingProjectSettings && (
@@ -690,7 +723,10 @@ export function Sidebar({
         )}
 
         <button
-          onClick={onOpenKnowledgeBase}
+          onClick={() => {
+            onOpenKnowledgeBase();
+            closeMobile();
+          }}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border-color)] transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -699,7 +735,10 @@ export function Sidebar({
           Knowledge Base
         </button>
         <button
-          onClick={onOpenPromptLibrary}
+          onClick={() => {
+            onOpenPromptLibrary();
+            closeMobile();
+          }}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border-color)] transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -708,7 +747,10 @@ export function Sidebar({
           Prompts
         </button>
         <button
-          onClick={onOpenArtifactLibrary}
+          onClick={() => {
+            onOpenArtifactLibrary();
+            closeMobile();
+          }}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border-color)] transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -743,6 +785,7 @@ export function Sidebar({
                   onClick={() => {
                     setShowMoreMenu(false);
                     onOpenModelsConfig();
+                    closeMobile();
                   }}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--border-color)]"
                   role="menuitem"
@@ -753,6 +796,7 @@ export function Sidebar({
                   onClick={() => {
                     setShowMoreMenu(false);
                     onOpenConnectorsConfig();
+                    closeMobile();
                   }}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--border-color)]"
                   role="menuitem"
@@ -763,6 +807,7 @@ export function Sidebar({
                   onClick={() => {
                     setShowMoreMenu(false);
                     onOpenSettings();
+                    closeMobile();
                   }}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--border-color)]"
                   role="menuitem"

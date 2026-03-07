@@ -344,6 +344,114 @@ function getPendingAskQuestionFromMessage(message: Message | null | undefined): 
   return null;
 }
 
+interface EmptyChatStateProps {
+  currentModel: string;
+  webSearchEnabled: boolean;
+  artifactsEnabled: boolean;
+  onUseTemplate: (
+    template: string,
+    options?: { enableWebSearch?: boolean; enableArtifacts?: boolean }
+  ) => void;
+  onOpenPromptLibrary: () => void;
+  onOpenKnowledgeBase: () => void;
+  onOpenModelsConfig: () => void;
+}
+
+function EmptyChatState({
+  currentModel,
+  webSearchEnabled,
+  artifactsEnabled,
+  onUseTemplate,
+  onOpenPromptLibrary,
+  onOpenKnowledgeBase,
+  onOpenModelsConfig,
+}: EmptyChatStateProps) {
+  const starterCards = [
+    {
+      title: 'Plan a project',
+      description: 'Turn a rough idea into milestones, risks, and next steps.',
+      action: () => onUseTemplate('Turn this idea into a short project plan with milestones, risks, and next steps: '),
+    },
+    {
+      title: 'Research a topic',
+      description: webSearchEnabled ? 'Use web search to gather current sources and summarize them.' : 'Enable web search and prepare a source-backed research prompt.',
+      action: () => onUseTemplate('Research this topic using current sources and summarize the key takeaways with citations: ', { enableWebSearch: true }),
+    },
+    {
+      title: 'Analyze a file',
+      description: 'Attach a document, spreadsheet, or image and ask for a structured review.',
+      action: () => onUseTemplate('Review the attached file and give me the main points, decisions, risks, and recommended next actions.'),
+    },
+    {
+      title: 'Create an artifact',
+      description: artifactsEnabled ? 'Generate editable docs, code, or presentation artifacts from chat.' : 'Enable artifacts and draft a prompt for a first deliverable.',
+      action: () => onUseTemplate('Create a polished one-page deliverable from this request. Ask clarifying questions only if required: ', { enableArtifacts: true }),
+    },
+  ];
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-5 py-10 md:px-8 md:py-14">
+        <section className="rounded-3xl border border-[var(--border-color)] bg-[var(--background)] px-6 py-8 shadow-sm">
+          <div className="max-w-2xl">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[var(--background)] px-3 py-1 text-xs text-gray-500">
+              <span className="inline-flex h-2 w-2 rounded-full bg-blue-500" />
+              Ready on {currentModel}
+            </div>
+            <h2 className="text-3xl font-semibold tracking-tight text-[var(--foreground)]">Start with a concrete task</h2>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-gray-600 dark:text-gray-300">
+              This workspace already supports prompts, artifacts, web search, document search, and project-scoped conversations.
+              Pick a starting point below or type directly into the composer.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                onClick={onOpenPromptLibrary}
+                className="rounded-full border border-[var(--border-color)] px-4 py-2 text-sm font-medium hover:bg-[var(--border-color)] transition-colors"
+              >
+                Browse prompts
+              </button>
+              <button
+                onClick={onOpenKnowledgeBase}
+                className="rounded-full border border-[var(--border-color)] px-4 py-2 text-sm font-medium hover:bg-[var(--border-color)] transition-colors"
+              >
+                Open knowledge base
+              </button>
+              <button
+                onClick={onOpenModelsConfig}
+                className="rounded-full border border-[var(--border-color)] px-4 py-2 text-sm font-medium hover:bg-[var(--border-color)] transition-colors"
+              >
+                Change model
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {starterCards.map((card) => (
+            <button
+              key={card.title}
+              onClick={card.action}
+              className="rounded-2xl border border-[var(--border-color)] bg-[var(--background)] p-5 text-left shadow-sm transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:hover:bg-blue-900/10"
+            >
+              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
+                </svg>
+              </div>
+              <h3 className="text-base font-semibold">{card.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300">{card.description}</p>
+            </button>
+          ))}
+        </section>
+
+        <section className="rounded-2xl border border-dashed border-[var(--border-color)] bg-[var(--background)]/60 px-5 py-4 text-sm text-gray-600 dark:text-gray-300">
+          Tip: attach files from the composer, enable tools only when you need them, and use projects when a conversation needs persistent instructions or reference files.
+        </section>
+      </div>
+    </div>
+  );
+}
+
 export function Chat() {
   // Core state
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -365,6 +473,7 @@ export function Chat() {
   const [contextBreakdown, setContextBreakdown] = useState<ContextBreakdown | null>(null);
   const [showContextInspector, setShowContextInspector] = useState(false);
   const [showSystemPromptInspector, setShowSystemPromptInspector] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingMessageRef = useRef<HTMLDivElement>(null);
   const { setTheme } = useTheme();
@@ -590,6 +699,27 @@ export function Chat() {
     saveSettings(newSettings);
     setSettings(newSettings);
   }, [settings]);
+
+  const handleUseStarterTemplate = useCallback((
+    template: string,
+    options?: { enableWebSearch?: boolean; enableArtifacts?: boolean }
+  ) => {
+    let nextSettings = settings;
+
+    if (options?.enableWebSearch && !nextSettings.webSearchEnabled) {
+      nextSettings = { ...nextSettings, webSearchEnabled: true };
+    }
+
+    if (options?.enableArtifacts && nextSettings.artifactsEnabled === false) {
+      nextSettings = { ...nextSettings, artifactsEnabled: true };
+    }
+
+    if (nextSettings !== settings) {
+      handleSaveSettings(nextSettings);
+    }
+
+    setPendingTemplateText(template);
+  }, [settings, handleSaveSettings]);
 
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -2021,7 +2151,15 @@ export function Chat() {
     : (currentConversation?.title || 'New chat');
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen overflow-hidden bg-[var(--chat-bg)]">
+      {isSidebarOpen && (
+        <button
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          aria-label="Close navigation"
+        />
+      )}
+
       <Sidebar
         conversations={conversations}
         projects={projects}
@@ -2083,18 +2221,47 @@ export function Chat() {
           setCurrentProjectId(null);
           resetArtifactPanel();
         }}
+        mobileOpen={isSidebarOpen}
+        onCloseMobile={() => setIsSidebarOpen(false)}
       />
 
       <div
-        className="flex-1 flex flex-col h-screen transition-all duration-200"
+        className="flex-1 min-w-0 flex flex-col h-screen transition-all duration-200"
         style={artifactPanelOpen ? { marginRight: `${artifactPanelWidth}%` } : undefined}
       >
-        <header className="h-14 border-b border-[var(--border-color)] px-3 sm:px-4">
+        <header className="h-14 border-b border-[var(--border-color)] bg-[var(--background)]/95 px-3 backdrop-blur sm:px-4">
           <div className="flex h-full min-w-0 items-center gap-2">
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="md:hidden shrink-0 rounded-lg border border-[var(--border-color)] p-2 hover:bg-[var(--border-color)] transition-colors"
+              aria-label="Open sidebar"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
             <h1 className="min-w-0 flex-1 truncate text-sm font-medium sm:text-base">{headerTitle}</h1>
 
             {isMainChatSurface && !currentProjectId && (
-              <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+              <>
+                <button
+                  onClick={() => {
+                    setShowModelsConfig(true);
+                    setShowArtifactLibrary(false);
+                    setShowKnowledgeBase(false);
+                    setShowConnectorsConfig(false);
+                    setShowPromptLibrary(false);
+                    setCurrentConversation(null);
+                    setCurrentProjectId(null);
+                    resetArtifactPanel();
+                  }}
+                  className="md:hidden shrink-0 max-w-[9rem] truncate rounded-full border border-[var(--border-color)] px-3 py-1 text-xs font-medium hover:bg-[var(--border-color)] transition-colors"
+                  title={`Current model: ${settings.model}`}
+                >
+                  {settings.model}
+                </button>
+
+                <div className="hidden min-w-0 items-center gap-2 overflow-x-auto md:flex">
                 <button
                   onClick={() => setShowContextInspector(true)}
                   disabled={!contextBreakdown}
@@ -2129,7 +2296,8 @@ export function Chat() {
                     </option>
                   ))}
                 </select>
-              </div>
+                </div>
+              </>
             )}
           </div>
         </header>
@@ -2176,6 +2344,16 @@ export function Chat() {
                 const newSettings = { ...settings, ...partial };
                 handleSaveSettings(newSettings);
               }}
+              onOpenKnowledgeBase={() => {
+                setShowKnowledgeBase(true);
+                setShowArtifactLibrary(false);
+                setShowModelsConfig(false);
+                setShowConnectorsConfig(false);
+                setShowPromptLibrary(false);
+                setCurrentConversation(null);
+                setCurrentProjectId(null);
+                resetArtifactPanel();
+              }}
               onClose={() => setShowConnectorsConfig(false)}
             />
           ) : showArtifactLibrary ? (
@@ -2192,6 +2370,16 @@ export function Chat() {
               onSettingsChange={(partial) => {
                 const newSettings = { ...settings, ...partial };
                 handleSaveSettings(newSettings);
+              }}
+              onOpenModelsConfig={() => {
+                setShowModelsConfig(true);
+                setShowArtifactLibrary(false);
+                setShowKnowledgeBase(false);
+                setShowConnectorsConfig(false);
+                setShowPromptLibrary(false);
+                setCurrentConversation(null);
+                setCurrentProjectId(null);
+                resetArtifactPanel();
               }}
               onClose={() => setShowKnowledgeBase(false)}
             />
@@ -2279,12 +2467,42 @@ export function Chat() {
               )}
             </>
           ) : (
-            <div className="h-full flex items-center justify-center">
-              <div className="text-center text-gray-500">
-                <h2 className="text-2xl font-semibold mb-2">How can I help you today?</h2>
-                <p className="text-sm">Send a message to start a conversation</p>
-              </div>
-            </div>
+            <EmptyChatState
+              currentModel={activeProjectModel}
+              webSearchEnabled={settings.webSearchEnabled}
+              artifactsEnabled={settings.artifactsEnabled !== false}
+              onUseTemplate={handleUseStarterTemplate}
+              onOpenPromptLibrary={() => {
+                setShowPromptLibrary(true);
+                setShowArtifactLibrary(false);
+                setShowModelsConfig(false);
+                setShowConnectorsConfig(false);
+                setShowKnowledgeBase(false);
+                setCurrentConversation(null);
+                setCurrentProjectId(null);
+                resetArtifactPanel();
+              }}
+              onOpenKnowledgeBase={() => {
+                setShowKnowledgeBase(true);
+                setShowArtifactLibrary(false);
+                setShowModelsConfig(false);
+                setShowConnectorsConfig(false);
+                setShowPromptLibrary(false);
+                setCurrentConversation(null);
+                setCurrentProjectId(null);
+                resetArtifactPanel();
+              }}
+              onOpenModelsConfig={() => {
+                setShowModelsConfig(true);
+                setShowArtifactLibrary(false);
+                setShowKnowledgeBase(false);
+                setShowConnectorsConfig(false);
+                setShowPromptLibrary(false);
+                setCurrentConversation(null);
+                setCurrentProjectId(null);
+                resetArtifactPanel();
+              }}
+            />
           )}
           <div ref={messagesEndRef} />
         </main>
@@ -2327,6 +2545,16 @@ export function Chat() {
               onToggleMemorySearch={handleToggleMemorySearch}
               ragEnabled={settings.ragEnabled}
               onToggleRAG={handleToggleRAG}
+              onOpenKnowledgeBase={() => {
+                setShowKnowledgeBase(true);
+                setShowArtifactLibrary(false);
+                setShowModelsConfig(false);
+                setShowConnectorsConfig(false);
+                setShowPromptLibrary(false);
+                setCurrentConversation(null);
+                setCurrentProjectId(null);
+                resetArtifactPanel();
+              }}
               artifactsEnabled={settings.artifactsEnabled}
               onToggleArtifacts={handleToggleArtifacts}
               mcpEnabled={settings.mcpEnabled}
