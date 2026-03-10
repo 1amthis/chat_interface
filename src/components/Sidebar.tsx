@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import { Conversation, Project, ProjectFile, PROJECT_COLORS, Provider, DEFAULT_MODELS } from '@/types';
 import { getStorageStats, generateId } from '@/lib/storage';
 
@@ -23,6 +23,7 @@ interface SidebarProps {
   onUpdateProjectInstructions: (id: string, instructions: string | undefined) => void;
   onUpdateProjectFiles: (id: string, files: ProjectFile[] | undefined) => void;
   onUpdateProjectProviderModel: (id: string, provider: Provider | undefined, model: string | undefined) => void;
+  onUpdateProjectSkills: (id: string, workspaceRoot: string | undefined, skillsEnabled: boolean) => void;
   onMoveToProject: (conversationId: string, projectId: string | undefined) => void;
   onOpenKnowledgeBase: () => void;
   onOpenArtifactLibrary: () => void;
@@ -53,7 +54,7 @@ function formatRelativeTime(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(timestamp);
 }
 
-function SectionLabel({ label, count, action }: { label: string; count?: number; action?: JSX.Element | null }) {
+function SectionLabel({ label, count, action }: { label: string; count?: number; action?: ReactNode }) {
   return (
     <div className="mb-1.5 flex items-center justify-between px-1">
       <div className="flex items-center gap-2">
@@ -98,6 +99,7 @@ export function Sidebar({
   onUpdateProjectInstructions,
   onUpdateProjectFiles,
   onUpdateProjectProviderModel,
+  onUpdateProjectSkills,
   onMoveToProject,
   onOpenKnowledgeBase,
   onOpenArtifactLibrary,
@@ -114,7 +116,16 @@ export function Sidebar({
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
-  const [editingProjectSettings, setEditingProjectSettings] = useState<{ id: string; name: string; instructions: string; files: ProjectFile[]; provider?: Provider; model?: string } | null>(null);
+  const [editingProjectSettings, setEditingProjectSettings] = useState<{
+    id: string;
+    name: string;
+    instructions: string;
+    files: ProjectFile[];
+    provider?: Provider;
+    model?: string;
+    workspaceRoot: string;
+    skillsEnabled: boolean;
+  } | null>(null);
   const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -546,6 +557,8 @@ export function Sidebar({
                                           files: project.files || [],
                                           provider: project.provider,
                                           model: project.model,
+                                          workspaceRoot: project.workspaceRoot || '',
+                                          skillsEnabled: project.skillsEnabled || false,
                                         });
                                         setProjectMenuId(null);
                                       }}
@@ -766,6 +779,44 @@ export function Sidebar({
               />
             </div>
 
+            <div className="mb-4 rounded-lg border border-[var(--border-color)] p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <label className="block text-sm font-medium">Project Skills</label>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Discover skills from <code>.claude/skills</code> inside this workspace.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={editingProjectSettings.skillsEnabled}
+                    onChange={(e) => setEditingProjectSettings({
+                      ...editingProjectSettings,
+                      skillsEnabled: e.target.checked,
+                    })}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  Enable
+                </label>
+              </div>
+
+              <label className="mt-4 block text-sm font-medium mb-2">
+                Workspace Root
+                <span className="text-xs text-gray-500 ml-2">(Absolute path on the machine running the app)</span>
+              </label>
+              <input
+                type="text"
+                value={editingProjectSettings.workspaceRoot}
+                onChange={(e) => setEditingProjectSettings({
+                  ...editingProjectSettings,
+                  workspaceRoot: e.target.value,
+                })}
+                className="w-full px-3 py-2 border border-[var(--border-color)] rounded-lg bg-[var(--background)]"
+                placeholder="/home/user/my-project"
+              />
+            </div>
+
             {/* Provider/Model Section */}
             <div className="mb-4">
               <label className="block text-sm font-medium mb-2">
@@ -887,6 +938,11 @@ export function Sidebar({
                   onUpdateProjectInstructions(editingProjectSettings.id, editingProjectSettings.instructions || undefined);
                   onUpdateProjectFiles(editingProjectSettings.id, editingProjectSettings.files.length > 0 ? editingProjectSettings.files : undefined);
                   onUpdateProjectProviderModel(editingProjectSettings.id, editingProjectSettings.provider, editingProjectSettings.model);
+                  onUpdateProjectSkills(
+                    editingProjectSettings.id,
+                    editingProjectSettings.workspaceRoot.trim() || undefined,
+                    editingProjectSettings.skillsEnabled
+                  );
                   setEditingProjectSettings(null);
                 }}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"

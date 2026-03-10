@@ -2,7 +2,8 @@
  * Shared utilities for all providers
  */
 
-import { Artifact } from '@/types';
+import { Artifact, ProjectSkillSummary } from '@/types';
+import { buildSkillsSystemPrompt as buildProjectSkillsSystemPrompt } from '@/lib/skills/prompt';
 
 /** Artifact tool names - duplicated here to avoid importing server-only definitions.ts */
 const ARTIFACT_TOOL_NAMES = ['create_artifact', 'update_artifact', 'read_artifact'];
@@ -225,10 +226,15 @@ interface EffectiveSystemPromptOptions {
   globalPrompt?: string;
   projectInstructions?: string;
   conversationPrompt?: string;
+  projectSkills?: ProjectSkillSummary[];
   artifactsEnabled?: boolean;
   existingArtifacts?: Artifact[];
   webSearchEnabled?: boolean;
   ragEnabled?: boolean;
+}
+
+export function buildSkillsSystemPrompt(projectSkills?: ProjectSkillSummary[]): string | undefined {
+  return buildProjectSkillsSystemPrompt(projectSkills);
 }
 
 /**
@@ -241,6 +247,7 @@ export function buildEffectiveSystemPrompt(options: EffectiveSystemPromptOptions
     globalPrompt,
     projectInstructions,
     conversationPrompt,
+    projectSkills,
     artifactsEnabled,
     existingArtifacts,
     webSearchEnabled,
@@ -248,13 +255,13 @@ export function buildEffectiveSystemPrompt(options: EffectiveSystemPromptOptions
   } = options;
 
   const basePrompt = mergeSystemPrompts(globalPrompt, projectInstructions, conversationPrompt);
+  const skillsPrompt = buildSkillsSystemPrompt(projectSkills);
   const artifactPrompt = artifactsEnabled !== false
     ? buildArtifactSystemPrompt(existingArtifacts && existingArtifacts.length > 0 ? existingArtifacts : undefined)
     : undefined;
 
-  let mergedPrompt = artifactPrompt
-    ? (basePrompt ? `${basePrompt}\n\n${artifactPrompt}` : artifactPrompt)
-    : basePrompt;
+  const basePromptSections = [basePrompt, skillsPrompt, artifactPrompt].filter(Boolean);
+  let mergedPrompt = basePromptSections.length > 0 ? basePromptSections.join('\n\n') : undefined;
 
   const citationPrompt = buildCitationSystemPrompt(webSearchEnabled, ragEnabled);
   const askQuestionPrompt = buildAskQuestionSystemPrompt();

@@ -7,6 +7,8 @@ import * as net from 'net';
 import { parse as parseHtml, Node, HTMLElement as NHTMLElement } from 'node-html-parser';
 import type { UnifiedTool, BuiltinToolsConfig } from '@/types';
 import type { MCPCallToolResult } from './types';
+import { readProjectSkillFile } from '@/lib/skills';
+import { READ_SKILL_TOOL_NAME } from '@/lib/skills/constants';
 
 // SQLite types and lazy loader
 type Database = import('better-sqlite3').Database;
@@ -67,6 +69,11 @@ interface SqlMutateResult {
   statement: string;
   changes: number;
   lastInsertRowid: number | bigint;
+}
+
+export interface BuiltinToolExecutionContext {
+  projectWorkspaceRoot?: string;
+  projectSkillsEnabled?: boolean;
 }
 
 export async function executeSql(
@@ -883,6 +890,42 @@ export async function shellExecute(
   }
 }
 
+export async function readSkill(
+  skillName: string,
+  relativePath: string | undefined,
+  context?: BuiltinToolExecutionContext
+): Promise<MCPCallToolResult> {
+  if (!context?.projectSkillsEnabled || !context.projectWorkspaceRoot) {
+    return {
+      content: [{ type: 'text', text: 'Project skills are not enabled for the active project.' }],
+      isError: true,
+    };
+  }
+
+  try {
+    const result = await readProjectSkillFile(context.projectWorkspaceRoot, skillName, relativePath);
+    const additionalFilesNotice = result.hasAdditionalFiles
+      ? `\n\nAdditional files are available in this skill directory. Use \`${READ_SKILL_TOOL_NAME}\` with \`relative_path\` if the instructions reference them.`
+      : '';
+
+    return {
+      content: [{
+        type: 'text',
+        text: `Skill: ${result.skillName}\nPath: ${result.relativePath}\n\n${result.content}${additionalFilesNotice}`,
+      }],
+      isError: false,
+    };
+  } catch (error) {
+    return {
+      content: [{
+        type: 'text',
+        text: `Skill read error: ${error instanceof Error ? error.message : String(error)}`,
+      }],
+      isError: true,
+    };
+  }
+}
+
 // Get tool definitions for enabled built-in tools
 
 export function getBuiltinTools(config: BuiltinToolsConfig): UnifiedTool[] {
@@ -1017,7 +1060,8 @@ export function getBuiltinTools(config: BuiltinToolsConfig): UnifiedTool[] {
 export async function executeBuiltinTool(
   toolName: string,
   params: Record<string, unknown>,
-  config: BuiltinToolsConfig
+  config: BuiltinToolsConfig,
+  context?: BuiltinToolExecutionContext
 ): Promise<MCPCallToolResult> {
   switch (toolName) {
     case 'filesystem_read': {
@@ -1077,6 +1121,26 @@ export async function executeBuiltinTool(
     case 'get_db_schema': {
       const tableName = typeof params.table_name === 'string' ? params.table_name : undefined;
       return getDbSchema(config, tableName);
+    }
+
+    case READ_SKILL_TOOL_NAME: {
+      if (typeof params.skill_name !== 'string') {
+        return {
+          content: [{ type: 'text', text: 'Invalid parameter: "skill_name" must be a string' }],
+          isError: true,
+        };
+      }
+      if (params.relative_path !== undefined && typeof params.relative_path !== 'string') {
+        return {
+          content: [{ type: 'text', text: 'Invalid parameter: "relative_path" must be a string' }],
+          isError: true,
+        };
+      }
+      return readSkill(
+        params.skill_name,
+        typeof params.relative_path === 'string' ? params.relative_path : undefined,
+        context
+      );
     }
 
     default:

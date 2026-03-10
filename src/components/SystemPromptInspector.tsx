@@ -98,7 +98,7 @@ export function SystemPromptInspector({ prompt, sections, onClose }: SystemPromp
         </div>
 
         <div className="px-5 py-3 border-t border-[var(--border-color)] text-xs text-gray-500 dark:text-gray-400">
-          Includes global settings, project instructions, conversation overrides, and automatic tool guidance.
+          Includes global settings, project instructions, project skills, conversation overrides, and automatic tool guidance.
         </div>
       </div>
     </div>

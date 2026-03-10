@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
-import { Project, Conversation, ProjectFile, Attachment, Provider } from '@/types';
+import { Project, Conversation, ProjectFile, Attachment, ProjectSkillSummary, Provider } from '@/types';
 import { generateId } from '@/lib/storage';
 import { ChatInput } from './ChatInput';
 import {
@@ -22,6 +22,7 @@ interface ProjectDashboardProps {
   onSendMessage: (message: string, attachments: Attachment[]) => void;
   onUpdateInstructions: (instructions: string | undefined) => void;
   onUpdateFiles: (files: ProjectFile[] | undefined) => void;
+  onUpdateSkills: (workspaceRoot: string | undefined, skillsEnabled: boolean) => void;
   isLoading: boolean;
   onStop?: () => void;
   webSearchEnabled?: boolean;
@@ -46,6 +47,8 @@ interface ProjectDashboardProps {
   thinkingSupported?: boolean;
   thinkingEnabled?: boolean;
   onToggleThinking?: () => void;
+  projectSkills?: ProjectSkillSummary[];
+  projectSkillsError?: string | null;
 }
 
 export function ProjectDashboard({
@@ -55,6 +58,7 @@ export function ProjectDashboard({
   onSendMessage,
   onUpdateInstructions,
   onUpdateFiles,
+  onUpdateSkills,
   isLoading,
   onStop,
   webSearchEnabled,
@@ -79,8 +83,12 @@ export function ProjectDashboard({
   thinkingSupported,
   thinkingEnabled,
   onToggleThinking,
+  projectSkills,
+  projectSkillsError,
 }: ProjectDashboardProps) {
   const [instructions, setInstructions] = useState(project.instructions || '');
+  const [workspaceRoot, setWorkspaceRoot] = useState(project.workspaceRoot || '');
+  const [skillsEnabled, setSkillsEnabled] = useState(project.skillsEnabled || false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | null>(null);
   const [showInstructions, setShowInstructions] = useState(true);
   const [showFiles, setShowFiles] = useState(true);
@@ -177,6 +185,9 @@ export function ProjectDashboard({
   };
 
   const sortedConversations = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt);
+  const skillsDirty =
+    workspaceRoot !== (project.workspaceRoot || '') ||
+    skillsEnabled !== (project.skillsEnabled || false);
 
   return (
     <div className="h-full flex flex-col">
@@ -224,6 +235,78 @@ export function ProjectDashboard({
             </p>
           </div>
         )}
+      </div>
+
+      {/* Skills Section */}
+      <div className="mb-8 border border-[var(--border-color)] rounded-lg overflow-hidden">
+        <div className="p-4 bg-[var(--border-color)]/30">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="font-semibold">Project Skills</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Discover Claude-compatible skills from <code>.claude/skills</code> in this workspace.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={skillsEnabled}
+                onChange={(e) => setSkillsEnabled(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              Enable skills
+            </label>
+          </div>
+        </div>
+        <div className="p-4 space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Workspace Root
+              <span className="text-xs text-gray-500 ml-2">(Absolute path on the machine running the app)</span>
+            </label>
+            <input
+              type="text"
+              value={workspaceRoot}
+              onChange={(e) => setWorkspaceRoot(e.target.value)}
+              className="w-full px-3 py-2 border border-[var(--border-color)] rounded bg-[var(--background)]"
+              placeholder="/home/user/my-project"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm text-gray-500">
+              {projectSkillsError
+                ? `Skills preview unavailable: ${projectSkillsError}`
+                : `${projectSkills?.length || 0} skill${projectSkills?.length === 1 ? '' : 's'} discovered`}
+            </div>
+            <button
+              onClick={() => onUpdateSkills(workspaceRoot.trim() || undefined, skillsEnabled)}
+              disabled={!skillsDirty}
+              className="px-3 py-1.5 rounded border border-[var(--border-color)] hover:bg-[var(--border-color)]/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Save skills settings
+            </button>
+          </div>
+
+          {!projectSkillsError && projectSkills && projectSkills.length > 0 && (
+            <div className="space-y-2">
+              {projectSkills.map((skill) => (
+                <div
+                  key={skill.name}
+                  className="rounded border border-[var(--border-color)] px-3 py-2 bg-[var(--background)]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">{skill.name}</span>
+                    {skill.hasAdditionalFiles && (
+                      <span className="text-xs text-gray-500">Additional files</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">{skill.description}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Files Section */}

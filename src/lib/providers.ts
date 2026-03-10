@@ -20,6 +20,7 @@ export {
   generateGeminiToolCallId,
   buildArtifactSystemPrompt,
   buildCitationSystemPrompt,
+  buildSkillsSystemPrompt,
   buildEffectiveSystemPrompt,
   isArtifactTool,
   // Tool definitions (for advanced use cases)

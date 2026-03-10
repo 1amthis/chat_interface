@@ -12,6 +12,7 @@ import {
   ArtifactType,
   ArtifactVersion,
   ArtifactOutputFormat,
+  Project,
 } from '@/types';
 import { saveSettings, generateId } from '@/lib/storage';
 import { API_CONFIG } from '@/lib/constants';
@@ -21,6 +22,7 @@ import { searchRAG, formatRAGResultsForAI, RAGSearchResult } from '@/lib/rag';
 export interface UseToolExecutionOptions {
   settings: ChatSettings;
   setSettings: (settings: ChatSettings) => void;
+  activeProject?: Project;
 }
 
 export interface ArtifactToolCallResult {
@@ -158,6 +160,7 @@ function applySearchReplacePatch(originalContent: string, patch: string): { cont
 export function useToolExecution({
   settings,
   setSettings,
+  activeProject,
 }: UseToolExecutionOptions): UseToolExecutionReturn {
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
 
@@ -299,6 +302,8 @@ export function useToolExecution({
             params,
             builtinToolsConfig: settings.builtinTools,
             provider: settings.provider,
+            projectWorkspaceRoot: activeProject?.workspaceRoot,
+            projectSkillsEnabled: activeProject?.skillsEnabled,
           }),
           signal: AbortSignal.timeout(60000), // 60 second timeout
         });
@@ -344,11 +349,17 @@ export function useToolExecution({
 
     console.error('MCP tool call error after all retries:', lastError);
     setSearchStatus(null);
-  return {
+    return {
       result: lastError?.message || 'Tool call failed',
       isError: true,
     };
-  }, [settings.builtinTools, settings.mcpServers, settings.provider]);
+  }, [
+    activeProject?.skillsEnabled,
+    activeProject?.workspaceRoot,
+    settings.builtinTools,
+    settings.mcpServers,
+    settings.provider,
+  ]);
 
   // Perform memory search across previous conversations
   const performMemorySearch = useCallback(async (

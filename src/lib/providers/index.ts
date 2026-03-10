@@ -15,7 +15,16 @@ export type {
 } from './types';
 
 // Re-export shared utilities
-export { mergeSystemPrompts, isOpenAIReasoningModel, generateGeminiToolCallId, buildArtifactSystemPrompt, buildCitationSystemPrompt, buildEffectiveSystemPrompt, isArtifactTool } from './base';
+export {
+  mergeSystemPrompts,
+  isOpenAIReasoningModel,
+  generateGeminiToolCallId,
+  buildArtifactSystemPrompt,
+  buildCitationSystemPrompt,
+  buildSkillsSystemPrompt,
+  buildEffectiveSystemPrompt,
+  isArtifactTool,
+} from './base';
 
 // Re-export tool definitions
 export {

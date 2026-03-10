@@ -30,6 +30,7 @@ export interface UseProjectsReturn {
   handleUpdateProjectInstructions: (id: string, instructions: string | undefined) => void;
   handleUpdateProjectFiles: (id: string, files: ProjectFile[] | undefined) => void;
   handleUpdateProjectProviderModel: (id: string, provider: Provider | undefined, model: string | undefined) => void;
+  handleUpdateProjectSkills: (id: string, workspaceRoot: string | undefined, skillsEnabled: boolean) => void;
   handleMoveToProject: (conversationId: string, projectId: string | undefined) => void;
 }
 
@@ -48,6 +49,7 @@ export function useProjects({
       name,
       color,
       createdAt: Date.now(),
+      skillsEnabled: false,
     };
     saveProject(project);
     setProjects(getProjects());
@@ -97,6 +99,18 @@ export function useProjects({
     }
   }, [projects, setProjects]);
 
+  const handleUpdateProjectSkills = useCallback((id: string, workspaceRoot: string | undefined, skillsEnabled: boolean) => {
+    const project = projects.find((p) => p.id === id);
+    if (project) {
+      saveProject({
+        ...project,
+        workspaceRoot,
+        skillsEnabled,
+      });
+      setProjects(getProjects());
+    }
+  }, [projects, setProjects]);
+
   const handleMoveToProject = useCallback((conversationId: string, projectId: string | undefined) => {
     updateConversationProject(conversationId, projectId);
     setConversations(getConversations());
@@ -112,6 +126,7 @@ export function useProjects({
     handleUpdateProjectInstructions,
     handleUpdateProjectFiles,
     handleUpdateProjectProviderModel,
+    handleUpdateProjectSkills,
     handleMoveToProject,
   };
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Message, Conversation, ChatSettings, DEFAULT_SETTINGS, DEFAULT_MODELS, Provider, Attachment, TokenUsage, Project, WebSearchResponse, GoogleDriveSearchResponse, ToolCall, ToolSource, ContentBlock, Artifact, ArtifactContentBlock, ReasoningContentBlock, ContextBreakdown, AskQuestionOption, AskQuestionPrompt, AskQuestionToolResult } from '@/types';
+import { Message, Conversation, ChatSettings, DEFAULT_SETTINGS, DEFAULT_MODELS, Provider, Attachment, TokenUsage, Project, ProjectSkillSummary, WebSearchResponse, GoogleDriveSearchResponse, ToolCall, ToolSource, ContentBlock, Artifact, ArtifactContentBlock, ReasoningContentBlock, ContextBreakdown, AskQuestionOption, AskQuestionPrompt, AskQuestionToolResult } from '@/types';
 import type { ToolExecutionResult } from '@/lib/providers';
 import {
   getConversations,
@@ -14,7 +14,7 @@ import {
   getProjects,
   addUsageRecord,
 } from '@/lib/storage';
-import { buildArtifactSystemPrompt, buildCitationSystemPrompt, buildEffectiveSystemPrompt, isArtifactTool, isOpenAIReasoningModel } from '@/lib/providers';
+import { buildArtifactSystemPrompt, buildCitationSystemPrompt, buildEffectiveSystemPrompt, buildSkillsSystemPrompt, isArtifactTool, isOpenAIReasoningModel } from '@/lib/providers';
 import { getActivePath, getSiblings, getDefaultLeaf, ensureTreeStructure } from '@/lib/conversation-tree';
 import { processStreamingChunk } from '@/lib/artifact-parser';
 import { MAX_TOOL_RECURSION_DEPTH } from '@/lib/constants';
@@ -473,6 +473,8 @@ export function Chat() {
   const [contextBreakdown, setContextBreakdown] = useState<ContextBreakdown | null>(null);
   const [showContextInspector, setShowContextInspector] = useState(false);
   const [showSystemPromptInspector, setShowSystemPromptInspector] = useState(false);
+  const [activeProjectSkills, setActiveProjectSkills] = useState<ProjectSkillSummary[]>([]);
+  const [activeProjectSkillsError, setActiveProjectSkillsError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingMessageRef = useRef<HTMLDivElement>(null);
@@ -512,6 +514,7 @@ export function Chat() {
     handleUpdateProjectInstructions,
     handleUpdateProjectFiles,
     handleUpdateProjectProviderModel,
+    handleUpdateProjectSkills,
     handleMoveToProject,
   } = useProjects({
     projects,
@@ -536,6 +539,11 @@ export function Chat() {
   } = useToolExecution({
     settings,
     setSettings,
+    activeProject: currentConversation?.projectId
+      ? projects.find((project) => project.id === currentConversation.projectId)
+      : currentProjectId
+        ? projects.find((project) => project.id === currentProjectId)
+        : undefined,
   });
 
   // Computed: active branch path for display and API calls
@@ -853,6 +861,72 @@ export function Chat() {
     return projectId ? projects.find((p) => p.id === projectId) : undefined;
   }, [currentConversation?.projectId, currentProjectId, projects]);
 
+  const fetchProjectSkillsCatalog = useCallback(async (
+    project: Project | undefined
+  ): Promise<{ skills: ProjectSkillSummary[]; error?: string }> => {
+    if (!project?.skillsEnabled || !project.workspaceRoot?.trim()) {
+      return { skills: [] };
+    }
+
+    try {
+      const response = await fetch('/api/skills/catalog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceRoot: project.workspaceRoot,
+          skillsEnabled: project.skillsEnabled,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const payload = await response.json();
+          detail = typeof payload.error === 'string' ? payload.error : '';
+        } catch {
+          detail = '';
+        }
+        throw new Error(detail || `Skills catalog request failed: ${response.status}`);
+      }
+
+      const payload = await response.json() as {
+        skills?: ProjectSkillSummary[];
+        error?: string;
+      };
+
+      return {
+        skills: Array.isArray(payload.skills) ? payload.skills : [],
+        error: typeof payload.error === 'string' ? payload.error : undefined,
+      };
+    } catch (error) {
+      return {
+        skills: [],
+        error: error instanceof Error ? error.message : 'Failed to load project skills.',
+      };
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSkills = async () => {
+      const result = await fetchProjectSkillsCatalog(promptInspectorProject);
+      if (cancelled) return;
+      setActiveProjectSkills(result.skills);
+      setActiveProjectSkillsError(result.error || null);
+    };
+
+    void loadSkills();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    fetchProjectSkillsCatalog,
+    promptInspectorProject,
+  ]);
+
   const promptInspectorSections = useMemo(() => {
     const sections: { label: string; content?: string }[] = [
       { label: 'Global Prompt', content: settings.systemPrompt?.trim() || undefined },
@@ -860,12 +934,19 @@ export function Chat() {
       { label: 'Conversation Prompt', content: currentConversation?.systemPrompt?.trim() || undefined },
     ];
 
+    const skillsPrompt = buildSkillsSystemPrompt(activeProjectSkills);
     const artifactPrompt = settings.artifactsEnabled !== false
       ? buildArtifactSystemPrompt(currentConversation?.artifacts)
       : undefined;
     const citationPrompt = buildCitationSystemPrompt(settings.webSearchEnabled, settings.ragEnabled);
 
     sections.push(
+      {
+        label: 'Project Skills (auto)',
+        content: activeProjectSkillsError
+          ? `Project skills could not be loaded: ${activeProjectSkillsError}`
+          : skillsPrompt,
+      },
       { label: 'Artifact Instructions (auto)', content: artifactPrompt },
       { label: 'Citation Instructions (auto)', content: citationPrompt }
     );
@@ -876,6 +957,8 @@ export function Chat() {
     settings.artifactsEnabled,
     settings.webSearchEnabled,
     settings.ragEnabled,
+    activeProjectSkills,
+    activeProjectSkillsError,
     promptInspectorProject?.instructions,
     currentConversation?.systemPrompt,
     currentConversation?.artifacts,
@@ -886,6 +969,7 @@ export function Chat() {
       globalPrompt: settings.systemPrompt,
       projectInstructions: promptInspectorProject?.instructions,
       conversationPrompt: currentConversation?.systemPrompt,
+      projectSkills: activeProjectSkills,
       artifactsEnabled: settings.artifactsEnabled,
       existingArtifacts: currentConversation?.artifacts,
       webSearchEnabled: settings.webSearchEnabled,
@@ -896,6 +980,7 @@ export function Chat() {
     settings.artifactsEnabled,
     settings.webSearchEnabled,
     settings.ragEnabled,
+    activeProjectSkills,
     promptInspectorProject?.instructions,
     currentConversation?.systemPrompt,
     currentConversation?.artifacts,
@@ -921,7 +1006,8 @@ export function Chat() {
     driveSearchResults?: GoogleDriveSearchResponse,
     toolExecutions?: ToolExecutionResult[],
     accumulatedContentBlocks?: ContentBlock[],
-    recursionDepth: number = 0
+    recursionDepth: number = 0,
+    projectSkillsCatalog?: ProjectSkillSummary[]
   ): Promise<void> => {
     // Compute parent ID for the assistant message from the active path
     const activePathForStream = getActivePath(conv.messages, conv.activeLeafId);
@@ -1013,6 +1099,12 @@ export function Chat() {
       : undefined;
 
     try {
+      const resolvedProjectSkills = projectSkillsCatalog ?? (
+        currentProject?.skillsEnabled && currentProject.workspaceRoot
+          ? (await fetchProjectSkillsCatalog(currentProject)).skills
+          : []
+      );
+
       abortControllerRef.current = new AbortController();
       // Combine user abort with a 5-minute streaming timeout
       const timeoutSignal = AbortSignal.timeout(300000); // 5 minutes
@@ -1026,6 +1118,7 @@ export function Chat() {
         globalPrompt: settings.systemPrompt,
         projectInstructions: currentProject?.instructions,
         conversationPrompt: conv.systemPrompt,
+        projectSkills: resolvedProjectSkills,
         artifactsEnabled: settings.artifactsEnabled,
         existingArtifacts: allCurrentArtifacts.length > 0 ? allCurrentArtifacts : undefined,
         webSearchEnabled: settings.webSearchEnabled,
@@ -1064,6 +1157,8 @@ export function Chat() {
           ragEnabled: settings.ragEnabled,
           artifactsEnabled: settings.artifactsEnabled,
           toolExecutions,
+          projectWorkspaceRoot: currentProject?.workspaceRoot,
+          projectSkillsEnabled: currentProject?.skillsEnabled,
         }),
         signal: combinedSignal,
       });
@@ -1300,7 +1395,7 @@ export function Chat() {
                   geminiThoughtSignature: anthropicThinkingSignature,
                 };
                 const allExecs = [...(toolExecutions || []), toolExecution];
-                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1, resolvedProjectSkills);
                 return;
               }
 
@@ -1347,7 +1442,7 @@ export function Chat() {
 
                 // Recursively call with accumulated tool executions so model sees full history
                 const allExecs = [...(toolExecutions || []), toolExecution];
-                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1, resolvedProjectSkills);
                 return;
               } else if (isArtifactTool(toolName)) {
                 // Artifact tool call - execute client-side
@@ -1421,7 +1516,7 @@ export function Chat() {
                 };
 
                 const allExecs = [...(toolExecutions || []), toolExecution];
-                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1, resolvedProjectSkills);
                 return;
               } else if (toolName === 'ask_question') {
                 const askQuestionResult = executeAskQuestionTool(toolParams);
@@ -1460,9 +1555,9 @@ export function Chat() {
                   };
 
                   const allExecs = [...(toolExecutions || []), toolExecution];
-                  await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
-                  return;
-                }
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1, resolvedProjectSkills);
+                return;
+              }
 
                 if (askQuestionResult.messageText) {
                   contentBlocksAccumulator.push({ type: 'text', text: askQuestionResult.messageText });
@@ -1586,7 +1681,7 @@ export function Chat() {
 
                 // Recursively call with accumulated tool executions so model sees full history
                 const allExecs = [...(toolExecutions || []), toolExecution];
-                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1, resolvedProjectSkills);
                 return;
               }
             }
@@ -1854,7 +1949,7 @@ export function Chat() {
               // Pass content blocks to preserve text and tool calls before the recursive call
               if (allToolExecutions.length > 0) {
                 const allExecs = [...(toolExecutions || []), ...allToolExecutions];
-                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1);
+                await streamResponse(conv, undefined, toolCallsAccumulator, undefined, allExecs, contentBlocksAccumulator, recursionDepth + 1, resolvedProjectSkills);
                 return;
               }
             }
@@ -1986,7 +2081,22 @@ export function Chat() {
       setCurrentToolCalls([]);
       resetStreamingState();
     }
-  }, [settings, projects, performSearch, performDriveSearch, performMemorySearch, performRAGSearch, performMCPToolCall, performArtifactToolCall, resetStreamingState, artifactParseStateRef, generateToolCallId, setSearchStatus, streamingArtifactsRef]);
+  }, [
+    settings,
+    projects,
+    performSearch,
+    performDriveSearch,
+    performMemorySearch,
+    performRAGSearch,
+    performMCPToolCall,
+    performArtifactToolCall,
+    resetStreamingState,
+    artifactParseStateRef,
+    generateToolCallId,
+    setSearchStatus,
+    streamingArtifactsRef,
+    fetchProjectSkillsCatalog,
+  ]);
 
   const handleSend = useCallback(async (content: string, attachments: Attachment[] = []) => {
     // Determine parent from the active branch
@@ -2190,6 +2300,7 @@ export function Chat() {
         onUpdateProjectInstructions={handleUpdateProjectInstructions}
         onUpdateProjectFiles={handleUpdateProjectFiles}
         onUpdateProjectProviderModel={handleUpdateProjectProviderModel}
+        onUpdateProjectSkills={handleUpdateProjectSkills}
         onMoveToProject={handleMoveToProject}
         onOpenKnowledgeBase={() => {
           setShowKnowledgeBase(true);
@@ -2410,6 +2521,9 @@ export function Chat() {
               onUpdateFiles={(files) =>
                 handleUpdateProjectFiles(currentProjectId, files)
               }
+              onUpdateSkills={(workspaceRoot, skillsEnabled) =>
+                handleUpdateProjectSkills(currentProjectId, workspaceRoot, skillsEnabled)
+              }
               isLoading={isLoading}
               onStop={handleStop}
               webSearchEnabled={settings.webSearchEnabled}
@@ -2434,6 +2548,8 @@ export function Chat() {
               thinkingSupported={projectThinkingSupported}
               thinkingEnabled={projectThinkingEnabled}
               onToggleThinking={() => handleToggleThinking(activeProjectProvider, activeProjectModel)}
+              projectSkills={activeProjectSkills}
+              projectSkillsError={activeProjectSkillsError}
             />
           ) : displayMessages.length ? (
             <>
@@ -2483,7 +2599,7 @@ export function Chat() {
           ) : (
             <EmptyChatState
               currentModel={activeProjectModel}
-              webSearchEnabled={settings.webSearchEnabled}
+              webSearchEnabled={!!settings.webSearchEnabled}
               artifactsEnabled={settings.artifactsEnabled !== false}
               onUseTemplate={handleUseStarterTemplate}
               onOpenPromptLibrary={() => {

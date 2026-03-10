@@ -102,6 +102,8 @@ export interface Project {
   files?: ProjectFile[];
   provider?: Provider;
   model?: string;
+  workspaceRoot?: string;
+  skillsEnabled?: boolean;
 }
 
 /** @deprecated Use Project instead */
@@ -418,6 +420,12 @@ export interface GoogleDriveSearchResponse {
   query: string;
   results: GoogleDriveSearchResult[];
   timestamp: number;
+}
+
+export interface ProjectSkillSummary {
+  name: string;
+  description: string;
+  hasAdditionalFiles: boolean;
 }
 
 // Additional MCP Types

@@ -20,6 +20,8 @@ interface CallToolRequest {
 
   // Config for built-in tools
   builtinToolsConfig?: BuiltinToolsConfig;
+  projectWorkspaceRoot?: string;
+  projectSkillsEnabled?: boolean;
 
   // Provider for formatting output
   provider?: Provider;
@@ -39,7 +41,13 @@ export async function POST(request: NextRequest) {
     const body: CallToolRequest = await request.json();
     let { source, serverId, toolName } = body;
     const { params, mcpServers } = body;
-    const { prefixedToolName, builtinToolsConfig, provider } = body;
+    const {
+      prefixedToolName,
+      builtinToolsConfig,
+      provider,
+      projectWorkspaceRoot,
+      projectSkillsEnabled,
+    } = body;
 
     // Parse prefixed tool name if provided
     if (prefixedToolName) {
@@ -91,15 +99,8 @@ export async function POST(request: NextRequest) {
 
       result = await callMCPTool(serverValidation.data, serverId, toolName, params || {});
     } else if (source === 'builtin') {
-      if (!builtinToolsConfig) {
-        return NextResponse.json(
-          { error: 'Built-in tools config is required' },
-          { status: 400 }
-        );
-      }
-
       // Validate builtinToolsConfig with zod to prevent malicious configs
-      const configValidation = builtinToolsConfigSchema.safeParse(builtinToolsConfig);
+      const configValidation = builtinToolsConfigSchema.safeParse(builtinToolsConfig ?? {});
       if (!configValidation.success) {
         return NextResponse.json(
           { error: 'Invalid built-in tools config', details: configValidation.error.format() },
@@ -107,7 +108,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      result = await executeBuiltinTool(toolName, params || {}, configValidation.data);
+      result = await executeBuiltinTool(toolName, params || {}, configValidation.data, {
+        projectWorkspaceRoot,
+        projectSkillsEnabled,
+      });
     } else {
       return NextResponse.json(
         { error: 'Unknown tool source. Specify source or use prefixed tool name.' },

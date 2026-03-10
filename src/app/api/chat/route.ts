@@ -6,6 +6,8 @@ import { getBuiltinTools } from '@/lib/mcp/builtin-tools';
 import { builtinToolsConfigSchema, mcpServerConfigArraySchema, validateCSRF } from '@/lib/mcp/server-config';
 import { estimateTokens, countInputTokensWithProviderAPI } from '@/lib/token-estimation';
 import { getModelMetadata } from '@/lib/model-metadata';
+import { discoverProjectSkills } from '@/lib/skills';
+import { getProjectSkillsTool } from '@/lib/skills/tool';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,6 +139,8 @@ export async function POST(request: NextRequest) {
       ragEnabled,
       toolExecutions,
       artifactsEnabled,
+      projectWorkspaceRoot,
+      projectSkillsEnabled,
     } = body as {
       messages: ChatMessage[];
       settings: ChatSettings;
@@ -149,10 +153,13 @@ export async function POST(request: NextRequest) {
       ragEnabled?: boolean;
       toolExecutions?: ToolExecutionResult[];
       artifactsEnabled?: boolean;
+      projectWorkspaceRoot?: string;
+      projectSkillsEnabled?: boolean;
     };
 
     // Collect MCP and built-in tools if enabled
     const mcpTools: UnifiedTool[] = [];
+    let projectSkillsCount = 0;
 
     if (settings.mcpEnabled) {
       if (settings.mcpServers && settings.mcpServers.length > 0) {
@@ -174,6 +181,18 @@ export async function POST(request: NextRequest) {
         mcpTools.push(...builtinTools);
       } else {
         console.warn('[chat/route] Ignoring invalid built-in tools configuration');
+      }
+    }
+
+    if (projectSkillsEnabled && projectWorkspaceRoot?.trim()) {
+      try {
+        const projectSkills = await discoverProjectSkills(projectWorkspaceRoot.trim());
+        if (projectSkills.length > 0) {
+          mcpTools.push(getProjectSkillsTool());
+          projectSkillsCount = projectSkills.length;
+        }
+      } catch (error) {
+        console.warn('[chat/route] Failed to discover project skills:', error);
       }
     }
 
@@ -210,6 +229,7 @@ export async function POST(request: NextRequest) {
     if (ragEnabled) builtinToolCount++;
     builtinToolCount++; // ask_question
     if (artifactsEnabled) builtinToolCount += 3; // create, update, read
+    if (projectSkillsCount > 0) builtinToolCount++;
     const toolDefsText = JSON.stringify(allTools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })));
     const toolTokens = estimateTokens(toolDefsText) + (builtinToolCount * 150); // ~150 tokens per built-in tool
     if (toolTokens > 0 && (allTools.length > 0 || builtinToolCount > 0)) {
