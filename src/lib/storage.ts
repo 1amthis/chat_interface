@@ -3,6 +3,7 @@ import { calculateCost } from './model-metadata';
 import { STORAGE_LIMITS } from './constants';
 import { getActivePathIds } from './conversation-tree';
 import { notify } from './notifications';
+export { generateTitle } from './conversation-title';
 
 const CONVERSATIONS_KEY = 'chat_conversations';
 const SETTINGS_KEY = 'chat_settings';
@@ -328,12 +329,6 @@ export function updateConversationFolder(conversationId: string, folderId: strin
 
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-}
-
-export function generateTitle(firstMessage: string): string {
-  const maxLength = 30;
-  const cleaned = firstMessage.replace(/\n/g, ' ').trim();
-  return cleaned.length > maxLength ? cleaned.substring(0, maxLength) + '...' : cleaned;
 }
 
 /**

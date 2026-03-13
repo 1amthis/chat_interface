@@ -109,9 +109,12 @@ export interface Project {
 /** @deprecated Use Project instead */
 export type Folder = Project;
 
+export type ConversationTitleState = 'pending' | 'auto' | 'fallback';
+
 export interface Conversation {
   id: string;
   title: string;
+  titleState?: ConversationTitleState;
   messages: Message[];
   artifacts?: Artifact[]; // Artifacts created in this conversation
   provider: Provider;

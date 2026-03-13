@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types --experimental-specifier-resolution=node src/lib/skills/index.test.mts",
+    "test": "node --test --experimental-strip-types --experimental-specifier-resolution=node src/test/all.test.mts",
     "sync:litellm-metadata": "node scripts/sync-litellm-metadata.mjs"
   },
   "dependencies": {

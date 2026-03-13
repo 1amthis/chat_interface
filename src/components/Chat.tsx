@@ -10,7 +10,6 @@ import {
   getSettings,
   saveSettings,
   generateId,
-  generateTitle,
   getProjects,
   addUsageRecord,
 } from '@/lib/storage';
@@ -18,6 +17,12 @@ import { buildArtifactSystemPrompt, buildCitationSystemPrompt, buildEffectiveSys
 import { getActivePath, getSiblings, getDefaultLeaf, ensureTreeStructure } from '@/lib/conversation-tree';
 import { processStreamingChunk } from '@/lib/artifact-parser';
 import { MAX_TOOL_RECURSION_DEPTH } from '@/lib/constants';
+import {
+  DEFAULT_PENDING_CONVERSATION_TITLE,
+  getFirstUserMessage,
+  resolveGeneratedConversationTitle,
+  shouldAutoGenerateConversationTitle,
+} from '@/lib/conversation-title';
 import { Sidebar } from './Sidebar';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
@@ -477,6 +482,7 @@ export function Chat() {
   const [activeProjectSkillsError, setActiveProjectSkillsError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const titleGenerationInFlightRef = useRef<Set<string>>(new Set());
   const streamingMessageRef = useRef<HTMLDivElement>(null);
   const { setTheme } = useTheme();
 
@@ -592,6 +598,93 @@ export function Chat() {
     }
   }, []);
 
+  const applyConversationTitle = useCallback((
+    conversationId: string,
+    title: string,
+    titleState: 'auto' | 'fallback'
+  ) => {
+    const latestConversation = getConversations().find((conversation) => conversation.id === conversationId);
+    if (!latestConversation || latestConversation.titleState !== 'pending') {
+      return;
+    }
+
+    const updatedConversation: Conversation = {
+      ...latestConversation,
+      title,
+      titleState,
+    };
+
+    saveConversation(updatedConversation);
+    const refreshedConversations = getConversations();
+    setConversations(refreshedConversations);
+
+    if (currentConversation?.id === conversationId) {
+      const nextCurrentConversation = refreshedConversations.find((conversation) => conversation.id === conversationId);
+      if (nextCurrentConversation) {
+        setCurrentConversation(nextCurrentConversation);
+      }
+    }
+  }, [currentConversation?.id]);
+
+  const requestConversationTitle = useCallback(async (conversationId: string) => {
+    if (titleGenerationInFlightRef.current.has(conversationId)) {
+      return;
+    }
+
+    const latestConversation = getConversations().find((conversation) => conversation.id === conversationId);
+    if (!latestConversation || !shouldAutoGenerateConversationTitle(latestConversation)) {
+      return;
+    }
+
+    const firstUserMessage = getFirstUserMessage(latestConversation);
+    if (!firstUserMessage) {
+      return;
+    }
+
+    titleGenerationInFlightRef.current.add(conversationId);
+
+    try {
+      const titleSettings: ChatSettings = {
+        ...settings,
+        provider: latestConversation.provider,
+        model: latestConversation.model,
+      };
+
+      const response = await fetch('/api/chat/title', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settings: titleSettings,
+          userMessage: firstUserMessage.content,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || `HTTP error: ${response.status}`);
+      }
+
+      const payload = (await response.json()) as { title?: string };
+      const resolvedTitle = resolveGeneratedConversationTitle(payload.title || '', firstUserMessage.content);
+      applyConversationTitle(conversationId, resolvedTitle.title, resolvedTitle.titleState);
+    } catch (error) {
+      console.warn('[title] Failed to generate conversation title:', error);
+      const fallbackTitle = resolveGeneratedConversationTitle('', firstUserMessage.content);
+      applyConversationTitle(conversationId, fallbackTitle.title, fallbackTitle.titleState);
+    } finally {
+      titleGenerationInFlightRef.current.delete(conversationId);
+    }
+  }, [applyConversationTitle, settings]);
+
+  useEffect(() => {
+    for (const conversation of conversations) {
+      if (!shouldAutoGenerateConversationTitle(conversation)) {
+        continue;
+      }
+      void requestConversationTitle(conversation.id);
+    }
+  }, [conversations, requestConversationTitle]);
+
   // Scroll to bottom when selecting a conversation
   const prevConversationId = useRef<string | null>(null);
   useEffect(() => {
@@ -638,7 +731,8 @@ export function Chat() {
     // Create a new conversation already associated with the project
     const newConversation: Conversation = {
       id: generateId(),
-      title: 'New conversation',
+      title: DEFAULT_PENDING_CONVERSATION_TITLE,
+      titleState: 'pending',
       messages: [],
       provider,
       model,
@@ -2125,7 +2219,8 @@ export function Chat() {
     } else {
       conv = {
         id: generateId(),
-        title: generateTitle(content),
+        title: DEFAULT_PENDING_CONVERSATION_TITLE,
+        titleState: 'pending',
         messages: [userMessage],
         provider: settings.provider,
         model: settings.model,
@@ -2156,7 +2251,8 @@ export function Chat() {
     // Create a new conversation for this project
     const conv: Conversation = {
       id: generateId(),
-      title: generateTitle(content),
+      title: DEFAULT_PENDING_CONVERSATION_TITLE,
+      titleState: 'pending',
       messages: [userMessage],
       provider,
       model,
