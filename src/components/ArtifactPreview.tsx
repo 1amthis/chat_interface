@@ -6,7 +6,6 @@ import { MarkdownPreview } from './artifact-previews/MarkdownPreview';
 import { HTMLPreview } from './artifact-previews/HTMLPreview';
 import { SVGPreview } from './artifact-previews/SVGPreview';
 import { MermaidPreview } from './artifact-previews/MermaidPreview';
-import { ReactPreview } from './artifact-previews/ReactPreview';
 import { PresentationPreview } from './artifact-previews/PresentationPreview';
 import { DocumentPreview } from './artifact-previews/DocumentPreview';
 
@@ -39,7 +38,8 @@ export function ArtifactPreview({ artifact, versionIndex }: ArtifactPreviewProps
       return <MermaidPreview content={content} />;
 
     case 'react':
-      return <ReactPreview content={content} />;
+      // React runtime preview is disabled for now due to instability.
+      return <CodePreview content={content} language={artifact.language || 'jsx'} />;
 
     case 'document':
       return <DocumentPreview content={content} />;

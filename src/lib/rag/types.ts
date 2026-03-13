@@ -8,6 +8,7 @@ export interface RAGDocument {
   type: string;
   size: number;
   chunkCount: number;
+  embeddingModel?: string;
   createdAt: number;
 }
 
@@ -16,6 +17,7 @@ export interface RAGChunk {
   documentId: string;
   content: string;
   embedding: number[];
+  embeddingModel?: string;
   position: number;
 }
 
@@ -24,6 +26,8 @@ export interface RAGSearchResult {
   chunkContent: string;
   position: number;
   score: number;
+  semanticScore?: number;
+  lexicalScore?: number;
 }
 
 export interface RAGUploadProgress {

@@ -31,6 +31,7 @@ interface ChatInputProps {
   onToggleMemorySearch?: () => void;
   ragEnabled?: boolean;
   onToggleRAG?: () => void;
+  onOpenKnowledgeBase?: () => void;
   artifactsEnabled?: boolean;
   onToggleArtifacts?: () => void;
   mcpEnabled?: boolean;
@@ -203,6 +204,7 @@ export function ChatInput({
   onToggleMemorySearch,
   ragEnabled,
   onToggleRAG,
+  onOpenKnowledgeBase,
   artifactsEnabled,
   onToggleArtifacts,
   mcpEnabled,
@@ -895,11 +897,23 @@ export function ChatInput({
                       disabled={isLoading || !onToggleRAG}
                       className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-sm hover:bg-[var(--border-color)]/60 disabled:opacity-50"
                     >
-                      <span>Document Search</span>
+                      <span>Document Search (RAG)</span>
                       <span className={`w-9 h-5 rounded-full p-0.5 transition-colors ${ragEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
                         <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${ragEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
                       </span>
                     </button>
+                    {onOpenKnowledgeBase && (
+                      <button
+                        onClick={() => {
+                          setShowToolsMenu(false);
+                          onOpenKnowledgeBase();
+                        }}
+                        disabled={isLoading}
+                        className="w-full text-left px-2 py-1 rounded-md text-xs text-gray-600 dark:text-gray-400 hover:bg-[var(--border-color)]/60 disabled:opacity-50 transition-colors"
+                      >
+                        Manage in Knowledge Base
+                      </button>
+                    )}
 
                     <button
                       onClick={onToggleArtifacts}

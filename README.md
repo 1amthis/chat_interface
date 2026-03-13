@@ -86,3 +86,4 @@ Open `http://localhost:3000`.
 ## MCP Notes
 
 For MCP server setup example, see [MCP_SETUP.md](./MCP_SETUP.md).
+For Google Workspace CLI MCP setup, including the required legacy version pin, see [GOOGLE_WORKSPACE_MCP.md](./GOOGLE_WORKSPACE_MCP.md).

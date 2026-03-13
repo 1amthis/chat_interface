@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { MCPServerConfig, BuiltinToolsConfig, MCPServerStatus } from '@/types';
 import { generateId } from '@/lib/storage';
+import { MCP_SERVER_PRESETS, type MCPServerPreset } from '@/lib/mcp/presets';
 
 interface MCPSettingsSectionProps {
   mcpEnabled: boolean;
@@ -31,6 +32,7 @@ export function MCPSettingsSection({
   const [serverTransport, setServerTransport] = useState<'stdio' | 'sse' | 'streamable-http' | 'http'>('stdio');
   const [serverCommand, setServerCommand] = useState('');
   const [serverArgs, setServerArgs] = useState('');
+  const [serverEnv, setServerEnv] = useState('');
   const [serverUrl, setServerUrl] = useState('');
   const [serverHeaders, setServerHeaders] = useState('');
 
@@ -39,6 +41,7 @@ export function MCPSettingsSection({
     setServerTransport('stdio');
     setServerCommand('');
     setServerArgs('');
+    setServerEnv('');
     setServerUrl('');
     setServerHeaders('');
     setShowAddServer(false);
@@ -68,6 +71,49 @@ export function MCPSettingsSection({
     return Object.entries(headers).map(([key, value]) => `${key}: ${value}`).join('\n');
   };
 
+  // Parse env from "KEY=VALUE" format (one per line)
+  const parseEnv = (envText: string): Record<string, string> | undefined => {
+    if (!envText.trim()) return undefined;
+    const env: Record<string, string> = {};
+    for (const line of envText.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const equalsIndex = trimmed.indexOf('=');
+      if (equalsIndex <= 0) continue;
+
+      const key = trimmed.slice(0, equalsIndex).trim();
+      const value = trimmed.slice(equalsIndex + 1).trim();
+      if (key) {
+        env[key] = value;
+      }
+    }
+    return Object.keys(env).length > 0 ? env : undefined;
+  };
+
+  const formatEnv = (env?: Record<string, string>): string => {
+    if (!env) return '';
+    return Object.entries(env).map(([key, value]) => `${key}=${value}`).join('\n');
+  };
+
+  const getUniqueServerName = (baseName: string): string => {
+    const existingNames = new Set(
+      mcpServers
+        .filter((server) => server.id !== editingServer?.id)
+        .map((server) => server.name)
+    );
+
+    if (!existingNames.has(baseName)) {
+      return baseName;
+    }
+
+    let suffix = 2;
+    while (existingNames.has(`${baseName} ${suffix}`)) {
+      suffix += 1;
+    }
+
+    return `${baseName} ${suffix}`;
+  };
+
   const handleAddServer = () => {
     if (!serverName.trim()) return;
     if (serverTransport === 'stdio' && !serverCommand.trim()) return;
@@ -82,6 +128,7 @@ export function MCPSettingsSection({
       args: serverTransport === 'stdio' && serverArgs.trim()
         ? serverArgs.split(' ').filter(Boolean)
         : undefined,
+      env: serverTransport === 'stdio' ? parseEnv(serverEnv) : undefined,
       url: (serverTransport === 'sse' || serverTransport === 'streamable-http' || serverTransport === 'http') ? serverUrl.trim() : undefined,
       headers: (serverTransport === 'sse' || serverTransport === 'streamable-http' || serverTransport === 'http') ? parseHeaders(serverHeaders) : undefined,
     };
@@ -101,9 +148,19 @@ export function MCPSettingsSection({
     setServerTransport(server.transport);
     setServerCommand(server.command || '');
     setServerArgs(server.args?.join(' ') || '');
+    setServerEnv(formatEnv(server.env));
     setServerUrl(server.url || '');
     setServerHeaders(formatHeaders(server.headers));
     setShowAddServer(true);
+  };
+
+  const handleAddPreset = (preset: MCPServerPreset) => {
+    const newServer: MCPServerConfig = {
+      ...preset.server,
+      id: generateId(),
+      name: getUniqueServerName(preset.server.name),
+    };
+    onServersChange([...mcpServers, newServer]);
   };
 
   const handleDeleteServer = (id: string) => {
@@ -260,6 +317,35 @@ export function MCPSettingsSection({
 
           {/* MCP Servers */}
           <div className="space-y-2">
+            <div className="space-y-2">
+              <h4 className="font-medium text-sm">Presets</h4>
+              {MCP_SERVER_PRESETS.map((preset) => (
+                <div
+                  key={preset.id}
+                  className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-background)]/40 space-y-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="font-medium text-sm">{preset.name}</div>
+                      <p className="text-xs text-gray-500">{preset.description}</p>
+                      {preset.note && (
+                        <p className="text-xs text-amber-700 dark:text-amber-300">{preset.note}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleAddPreset(preset)}
+                      className="text-xs px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 shrink-0"
+                    >
+                      Add Preset
+                    </button>
+                  </div>
+                  <div className="text-xs text-gray-500 break-all">
+                    {preset.server.command} {preset.server.args?.join(' ')}
+                  </div>
+                </div>
+              ))}
+            </div>
+
             <div className="flex items-center justify-between">
               <h4 className="font-medium text-sm">MCP Servers</h4>
               <button
@@ -334,9 +420,12 @@ export function MCPSettingsSection({
                   </div>
                   <div className="text-xs text-gray-500">
                     {server.transport === 'stdio' ? (
-                      <>
-                        {server.command} {server.args?.join(' ')}
-                      </>
+                      <div className="space-y-1">
+                        <div>{server.command} {server.args?.join(' ')}</div>
+                        {server.env && Object.keys(server.env).length > 0 && (
+                          <div>Env: {Object.keys(server.env).join(', ')}</div>
+                        )}
+                      </div>
                     ) : (
                       server.url
                     )}
@@ -402,6 +491,18 @@ export function MCPSettingsSection({
                         onChange={(e) => setServerArgs(e.target.value)}
                         className="w-full px-2 py-1 text-sm rounded border border-[var(--border-color)] bg-[var(--background)]"
                         placeholder="/path/to/directory"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Environment variables (KEY=VALUE, one per line)
+                      </label>
+                      <textarea
+                        value={serverEnv}
+                        onChange={(e) => setServerEnv(e.target.value)}
+                        className="w-full px-2 py-1 text-sm rounded border border-[var(--border-color)] bg-[var(--background)]"
+                        rows={3}
+                        placeholder={'GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file\nGOOGLE_WORKSPACE_CLI_ACCOUNT=default'}
                       />
                     </div>
                   </>

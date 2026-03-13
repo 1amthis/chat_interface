@@ -105,8 +105,14 @@ function stripMarkdownNoise(value: string): string {
     .trim();
 }
 
+function stripLeadingYamlFrontmatter(content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const frontmatterMatch = normalized.match(/^---\n[\s\S]*?\n---(?:\n|$)/);
+  return frontmatterMatch ? normalized.slice(frontmatterMatch[0].length) : normalized;
+}
+
 function extractSkillDescription(content: string): string {
-  const paragraphs = content
+  const paragraphs = stripLeadingYamlFrontmatter(content)
     .split(/\n\s*\n/)
     .map((part) => stripMarkdownNoise(part))
     .filter((part) => part.length > 0 && !part.startsWith('#'));

@@ -18,6 +18,7 @@ import { MCPSettingsSection } from './MCPSettingsSection';
 interface ConnectorsConfigProps {
   settings: ChatSettings;
   onSettingsChange: (settings: Partial<ChatSettings>) => void;
+  onOpenKnowledgeBase?: () => void;
   onClose: () => void;
 }
 
@@ -85,7 +86,7 @@ const getCatalogParameters = (tool: UnifiedTool): CatalogParameter[] => {
   });
 };
 
-export function ConnectorsConfig({ settings, onSettingsChange, onClose }: ConnectorsConfigProps) {
+export function ConnectorsConfig({ settings, onSettingsChange, onOpenKnowledgeBase, onClose }: ConnectorsConfigProps) {
   const [googleDriveConfigured, setGoogleDriveConfigured] = useState(false);
   const [sqliteTestStatus, setSqliteTestStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [sqliteTesting, setSqliteTesting] = useState(false);
@@ -642,9 +643,19 @@ export function ConnectorsConfig({ settings, onSettingsChange, onClose }: Connec
               />
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-3">
-            Upload and manage documents in the Knowledge Base view.
-          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <p className="text-xs text-gray-500">
+              Use Knowledge Base as the main place to upload, test, and tune RAG.
+            </p>
+            {onOpenKnowledgeBase && (
+              <button
+                onClick={onOpenKnowledgeBase}
+                className="text-xs px-2.5 py-1 rounded border border-[var(--border-color)] hover:bg-[var(--border-color)]/40 transition-colors"
+              >
+                Manage in Knowledge Base
+              </button>
+            )}
+          </div>
         </section>
 
         {/* SQLite Database */}

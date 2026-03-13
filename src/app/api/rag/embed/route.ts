@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { validateCSRF } from '@/lib/mcp/server-config';
 
+const SUPPORTED_EMBEDDING_MODELS = new Set([
+  'text-embedding-3-small',
+  'text-embedding-3-large',
+  'text-embedding-ada-002',
+]);
 const MAX_TEXTS_PER_REQUEST = 20;
 const MAX_TEXT_LENGTH = 50_000;
 const MAX_TOTAL_TEXT_LENGTH = 200_000;
@@ -13,9 +18,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { texts, openaiKey } = body as {
+    const { texts, openaiKey, model } = body as {
       texts: string[];
       openaiKey: string;
+      model?: string;
     };
 
     if (!texts || !Array.isArray(texts) || texts.length === 0) {
@@ -39,10 +45,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Total text length exceeds ${MAX_TOTAL_TEXT_LENGTH} characters` }, { status: 400 });
     }
 
+    const embeddingModel = model || 'text-embedding-3-small';
+    if (!SUPPORTED_EMBEDDING_MODELS.has(embeddingModel)) {
+      return NextResponse.json({ error: `Unsupported embedding model: ${embeddingModel}` }, { status: 400 });
+    }
+
     const client = new OpenAI({ apiKey: openaiKey });
 
     const response = await client.embeddings.create({
-      model: 'text-embedding-3-small',
+      model: embeddingModel,
       input: texts,
     });
 

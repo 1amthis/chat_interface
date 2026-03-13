@@ -350,6 +350,7 @@ export async function POST(request: NextRequest) {
       contextWindowSize,
       percentUsed: contextWindowSize > 0 ? (totalEstimatedTokens / contextWindowSize) * 100 : 0,
       model: settings.model,
+      systemPrompt: systemPrompt || undefined,
       countingMethod,
       countingProvider: settings.provider,
       countingSource,

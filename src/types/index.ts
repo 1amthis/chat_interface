@@ -202,8 +202,9 @@ export interface ChatSettings {
   // RAG search settings
   ragEnabled?: boolean;
   ragChunkStrategy?: 'paragraph' | 'fixed' | 'sentence' | 'markdown';
-  ragChunkSize?: number;    // 500–5000, default 2000
-  ragChunkOverlap?: number; // 0–500, default 200
+  ragChunkSize?: number;    // approx tokens: 128-3000, default 800
+  ragChunkOverlap?: number; // approx tokens: 0-600, default 120
+  ragEmbeddingModel?: 'text-embedding-3-small' | 'text-embedding-3-large' | 'text-embedding-ada-002';
   // Memory search tuning
   memorySearchLimit?: number;         // 1-20, default 5
   memorySearchMinScore?: number;      // 0-1, default 0.1
@@ -213,6 +214,10 @@ export interface ChatSettings {
   // RAG search tuning
   ragSearchLimit?: number;            // 1-20, default 5
   ragSearchMinScore?: number;         // 0-1, default 0.3
+  ragSearchMode?: 'vector' | 'hybrid'; // default hybrid
+  ragHybridAlpha?: number;            // semantic weight in hybrid, 0-1, default 0.75
+  ragBm25K1?: number;                 // 0.5-3.0, default 1.2
+  ragBm25B?: number;                  // 0-1.0, default 0.75
   // Artifacts settings
   artifactsEnabled?: boolean;
   // Generation parameters (undefined = provider defaults)
@@ -319,6 +324,7 @@ export interface ContextBreakdown {
   contextWindowSize: number;
   percentUsed: number;
   model: string;
+  systemPrompt?: string;
   countingMethod?: 'provider_api' | 'heuristic';
   countingProvider?: Provider;
   countingSource?: string;

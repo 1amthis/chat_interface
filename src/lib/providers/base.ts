@@ -126,12 +126,12 @@ export function buildArtifactSystemPrompt(existingArtifacts?: Artifact[]): strin
 
 You have access to artifact tools for creating and managing substantial content:
 
-- **create_artifact**: Create a new artifact (code, html, react, markdown, svg, mermaid, document, spreadsheet, presentation).
+- **create_artifact**: Create a new artifact (code, html, markdown, svg, mermaid, document, spreadsheet, presentation). React preview is disabled; use **code** for JSX/TSX or **html** for browser previews.
 - **update_artifact**: Update an artifact using either full \`content\` replacement or a targeted \`patch\`.
 - **read_artifact**: Read an artifact's current content before editing it.
 
 ### When to use artifacts vs. inline code
-- Use **create_artifact** for: complete programs, full HTML pages, React components, diagrams, structured documents, spreadsheets, slide outlines, or any content that benefits from a preview panel.
+- Use **create_artifact** for: complete programs, full HTML pages, diagrams, structured documents, spreadsheets, slide outlines, or any content that benefits from a preview panel.
 - Use **inline code blocks** for: short snippets, one-liners, explanations with small code examples, or partial code shown for illustration.
 - When generating files for export, prefer:
   - **document** for DOCX/PDF style output

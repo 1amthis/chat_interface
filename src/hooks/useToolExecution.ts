@@ -406,6 +406,11 @@ export function useToolExecution({
       const results = await searchRAG(query, settings.openaiKey, {
         limit: settings.ragSearchLimit ?? 5,
         minScore: settings.ragSearchMinScore ?? 0.3,
+        mode: settings.ragSearchMode ?? 'hybrid',
+        hybridAlpha: settings.ragHybridAlpha ?? 0.75,
+        bm25K1: settings.ragBm25K1 ?? 1.2,
+        bm25B: settings.ragBm25B ?? 0.75,
+        embeddingModel: settings.ragEmbeddingModel ?? 'text-embedding-3-small',
       });
 
       setSearchStatus(null);
@@ -419,7 +424,16 @@ export function useToolExecution({
       setSearchStatus(null);
       throw error instanceof Error ? error : new Error('RAG search failed');
     }
-  }, [settings.openaiKey, settings.ragSearchLimit, settings.ragSearchMinScore]);
+  }, [
+    settings.openaiKey,
+    settings.ragSearchLimit,
+    settings.ragSearchMinScore,
+    settings.ragSearchMode,
+    settings.ragHybridAlpha,
+    settings.ragBm25K1,
+    settings.ragBm25B,
+    settings.ragEmbeddingModel,
+  ]);
 
   // Execute artifact tool calls client-side (no API call needed)
   const performArtifactToolCall = useCallback((

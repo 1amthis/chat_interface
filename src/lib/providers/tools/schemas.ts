@@ -138,14 +138,14 @@ export const ASK_QUESTION_SCHEMA: ToolSchema = {
 
 export const CREATE_ARTIFACT_SCHEMA: ToolSchema = {
   name: 'create_artifact',
-  description: 'Create a new artifact. Supported types: code, html, react, markdown, svg, mermaid, document, spreadsheet, presentation. Use this for substantial, self-contained content that benefits from a dedicated preview panel. Do NOT use this for short code snippets shown inline in conversation.',
+  description: 'Create a new artifact. Supported types: code, html, markdown, svg, mermaid, document, spreadsheet, presentation. React preview is disabled; use type "code" (jsx/tsx) or "html" instead of "react". Use this for substantial, self-contained content that benefits from a dedicated preview panel. Do NOT use this for short code snippets shown inline in conversation.',
   parameters: {
     type: 'object',
     properties: {
       type: {
         type: 'string',
         description: 'The artifact type.',
-        enum: ['code', 'html', 'react', 'markdown', 'svg', 'mermaid', 'document', 'spreadsheet', 'presentation'],
+        enum: ['code', 'html', 'markdown', 'svg', 'mermaid', 'document', 'spreadsheet', 'presentation'],
       },
       title: {
         type: 'string',

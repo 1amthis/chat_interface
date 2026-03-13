@@ -4,7 +4,18 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { RAGDocument, RAGUploadProgress } from '@/lib/rag/types';
 import { uploadDocument, removeDocument, listDocuments, clearRAGStore, getDocumentChunks } from '@/lib/rag';
 import type { RAGChunk } from '@/lib/rag';
-import type { ChunkStrategy } from '@/lib/rag/chunker';
+import {
+  type ChunkStrategy,
+  DEFAULT_CHUNK_SIZE_TOKENS,
+  DEFAULT_OVERLAP_TOKENS,
+  MIN_CHUNK_SIZE_TOKENS,
+  MAX_CHUNK_SIZE_TOKENS,
+  MIN_OVERLAP_TOKENS,
+  MAX_OVERLAP_TOKENS,
+  normalizeChunkSizeSetting,
+  normalizeChunkOverlapSetting,
+} from '@/lib/rag/chunker';
+import { type EmbeddingModel, DEFAULT_EMBEDDING_MODEL } from '@/lib/rag/embeddings';
 
 const ACCEPTED_EXTENSIONS = [
   '.txt', '.md', '.csv', '.json', '.js', '.ts', '.py', '.html', '.css',
@@ -15,16 +26,21 @@ const ACCEPTED_EXTENSIONS = [
 
 const STRATEGY_OPTIONS: { value: ChunkStrategy; label: string; description: string }[] = [
   { value: 'paragraph', label: 'Paragraph', description: 'Split on double newlines' },
-  { value: 'fixed', label: 'Fixed-size', description: 'Sliding window with word-boundary snapping' },
+  { value: 'fixed', label: 'Fixed-size', description: 'Sliding window by token budget' },
   { value: 'sentence', label: 'Sentence', description: 'Accumulate sentences to chunk size' },
   { value: 'markdown', label: 'Markdown heading', description: 'Split on # headings' },
 ];
 
 interface RAGSettingsSectionProps {
   openaiKey?: string;
+  embeddingModel?: EmbeddingModel;
   chunkStrategy?: ChunkStrategy;
   chunkSize?: number;
   chunkOverlap?: number;
+  showUploadArea?: boolean;
+  showChunkingSettings?: boolean;
+  showDocumentsList?: boolean;
+  onDocumentsChange?: () => void;
   onChunkSettingsChange?: (settings: {
     ragChunkStrategy?: ChunkStrategy;
     ragChunkSize?: number;
@@ -34,9 +50,14 @@ interface RAGSettingsSectionProps {
 
 export function RAGSettingsSection({
   openaiKey,
+  embeddingModel = DEFAULT_EMBEDDING_MODEL,
   chunkStrategy = 'paragraph',
-  chunkSize = 2000,
-  chunkOverlap = 200,
+  chunkSize = DEFAULT_CHUNK_SIZE_TOKENS,
+  chunkOverlap = DEFAULT_OVERLAP_TOKENS,
+  showUploadArea = true,
+  showChunkingSettings = true,
+  showDocumentsList = true,
+  onDocumentsChange,
   onChunkSettingsChange,
 }: RAGSettingsSectionProps) {
   const [documents, setDocuments] = useState<RAGDocument[]>([]);
@@ -55,15 +76,24 @@ export function RAGSettingsSection({
   const loadDocuments = useCallback(async () => {
     try {
       const docs = await listDocuments();
-      setDocuments(docs);
+      const filtered = docs.filter((doc) => {
+        const docModel = doc.embeddingModel || DEFAULT_EMBEDDING_MODEL;
+        return docModel === embeddingModel;
+      });
+      setDocuments(filtered);
     } catch (e) {
       console.error('Failed to load RAG documents:', e);
     }
-  }, []);
+  }, [embeddingModel]);
 
   useEffect(() => {
+    if (!showDocumentsList) return;
     loadDocuments();
-  }, [loadDocuments]);
+  }, [loadDocuments, showDocumentsList]);
+
+  const effectiveChunkSize = normalizeChunkSizeSetting(chunkSize);
+  const effectiveChunkOverlap = normalizeChunkOverlapSetting(chunkOverlap, effectiveChunkSize, chunkSize);
+  const maxOverlapForSize = Math.min(MAX_OVERLAP_TOKENS, Math.max(MIN_OVERLAP_TOKENS, effectiveChunkSize - 1));
 
   const handleToggleExpand = useCallback(async (docId: string) => {
     if (expandedDocId === docId) {
@@ -112,18 +142,21 @@ export function RAGSettingsSection({
       for (const file of Array.from(files)) {
         await uploadDocument(file, openaiKey, setProgress, {
           strategy: chunkStrategy,
-          chunkSize,
-          overlap: chunkOverlap,
-        });
+          chunkSize: effectiveChunkSize,
+          overlap: effectiveChunkOverlap,
+        }, embeddingModel);
       }
-      await loadDocuments();
+      if (showDocumentsList) {
+        await loadDocuments();
+      }
+      onDocumentsChange?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed');
     } finally {
       setUploading(false);
       setProgress(null);
     }
-  }, [openaiKey, loadDocuments, chunkStrategy, chunkSize, chunkOverlap]);
+  }, [openaiKey, loadDocuments, chunkStrategy, effectiveChunkSize, effectiveChunkOverlap, showDocumentsList, onDocumentsChange, embeddingModel]);
 
   const handleDelete = useCallback(async (docId: string) => {
     try {
@@ -135,10 +168,11 @@ export function RAGSettingsSection({
         return next;
       });
       await loadDocuments();
+      onDocumentsChange?.();
     } catch (e) {
       console.error('Failed to delete document:', e);
     }
-  }, [loadDocuments, expandedDocId]);
+  }, [loadDocuments, expandedDocId, onDocumentsChange]);
 
   const handleClearAll = useCallback(async () => {
     try {
@@ -146,18 +180,20 @@ export function RAGSettingsSection({
       setDocuments([]);
       setExpandedDocId(null);
       setDocChunks(new Map());
+      onDocumentsChange?.();
     } catch (e) {
       console.error('Failed to clear RAG store:', e);
     }
-  }, []);
+  }, [onDocumentsChange]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    if (!openaiKey) return;
     if (e.dataTransfer.files.length > 0) {
       handleUpload(e.dataTransfer.files);
     }
-  }, [handleUpload]);
+  }, [handleUpload, openaiKey]);
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -173,109 +209,124 @@ export function RAGSettingsSection({
     : 'Storing...'
     : '';
 
-  if (!openaiKey) {
-    return (
-      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
-        <p className="text-xs text-yellow-700 dark:text-yellow-300">
-          Document search requires an OpenAI API key (for embeddings). Set your OpenAI API key in Models & Providers.
-        </p>
-      </div>
-    );
-  }
+  const canUpload = !!openaiKey;
 
   return (
     <div className="space-y-3">
-      {/* Upload area */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
-          dragOver
-            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-            : 'border-[var(--border-color)] hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-900/10'
-        }`}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={ACCEPTED_EXTENSIONS.join(',')}
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files && e.target.files.length > 0) {
-              handleUpload(e.target.files);
-              e.target.value = '';
-            }
-          }}
-        />
-        <svg className="w-8 h-8 mx-auto mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-        </svg>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          Drop files here or click to upload
-        </p>
-        <p className="text-xs text-gray-400 mt-1">
-          Text, code, markdown, PDF, DOCX, XLSX, and more
-        </p>
-      </div>
+      {showUploadArea && (
+        <>
+          {/* Upload area */}
+          <div
+            onDragOver={(e) => {
+              if (!canUpload) return;
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => {
+              if (canUpload) {
+                fileInputRef.current?.click();
+              }
+            }}
+            className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+              canUpload ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'
+            } ${
+              dragOver && canUpload
+                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                : 'border-[var(--border-color)] hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-900/10'
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_EXTENSIONS.join(',')}
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleUpload(e.target.files);
+                  e.target.value = '';
+                }
+              }}
+            />
+            <svg className="w-8 h-8 mx-auto mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              {canUpload ? 'Drop files here or click to upload' : 'Set an OpenAI API key to upload files'}
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              Text, code, markdown, PDF, DOCX, XLSX, and more
+            </p>
+          </div>
+        </>
+      )}
 
       {/* Chunking settings */}
-      <div className="space-y-2 p-3 rounded-lg bg-[var(--border-color)]/20 border border-[var(--border-color)]">
-        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Chunking Strategy</p>
-        <select
-          value={chunkStrategy}
-          onChange={(e) => onChunkSettingsChange?.({ ragChunkStrategy: e.target.value as ChunkStrategy })}
-          className="w-full px-2 py-1.5 text-sm rounded border border-[var(--border-color)] bg-[var(--background)]"
-        >
-          {STRATEGY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label} — {opt.description}
-            </option>
-          ))}
-        </select>
+      {showChunkingSettings && (
+        <div className="space-y-2 p-3 rounded-lg bg-[var(--border-color)]/20 border border-[var(--border-color)]">
+          <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Chunking Strategy</p>
+          <select
+            value={chunkStrategy}
+            onChange={(e) => onChunkSettingsChange?.({ ragChunkStrategy: e.target.value as ChunkStrategy })}
+            className="w-full px-2 py-1.5 text-sm rounded border border-[var(--border-color)] bg-[var(--background)]"
+          >
+            {STRATEGY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label} — {opt.description}
+              </option>
+            ))}
+          </select>
 
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="text-xs text-gray-600 dark:text-gray-400">Chunk size</label>
-            <span className="text-xs font-mono text-gray-500">{chunkSize}</span>
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-gray-600 dark:text-gray-400">Chunk size (tokens)</label>
+              <span className="text-xs font-mono text-gray-500">{effectiveChunkSize}</span>
+            </div>
+            <input
+              type="range"
+              min={MIN_CHUNK_SIZE_TOKENS}
+              max={MAX_CHUNK_SIZE_TOKENS}
+              step={25}
+              value={effectiveChunkSize}
+              onChange={(e) => {
+                const nextSize = Number(e.target.value);
+                const nextOverlap = Math.min(effectiveChunkOverlap, Math.max(0, nextSize - 1));
+                onChunkSettingsChange?.({
+                  ragChunkSize: nextSize,
+                  ...(nextOverlap !== effectiveChunkOverlap ? { ragChunkOverlap: nextOverlap } : {}),
+                });
+              }}
+              className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <div className="flex justify-between text-[10px] text-gray-400">
+              <span>{MIN_CHUNK_SIZE_TOKENS}</span>
+              <span>{MAX_CHUNK_SIZE_TOKENS}</span>
+            </div>
           </div>
-          <input
-            type="range"
-            min={500}
-            max={5000}
-            step={100}
-            value={chunkSize}
-            onChange={(e) => onChunkSettingsChange?.({ ragChunkSize: Number(e.target.value) })}
-            className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-blue-600"
-          />
-          <div className="flex justify-between text-[10px] text-gray-400">
-            <span>500</span>
-            <span>5000</span>
+
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-gray-600 dark:text-gray-400">Overlap (tokens)</label>
+              <span className="text-xs font-mono text-gray-500">{effectiveChunkOverlap}</span>
+            </div>
+            <input
+              type="range"
+              min={MIN_OVERLAP_TOKENS}
+              max={maxOverlapForSize}
+              step={10}
+              value={effectiveChunkOverlap}
+              onChange={(e) => onChunkSettingsChange?.({ ragChunkOverlap: Number(e.target.value) })}
+              className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <div className="flex justify-between text-[10px] text-gray-400">
+              <span>{MIN_OVERLAP_TOKENS}</span>
+              <span>{maxOverlapForSize}</span>
+            </div>
           </div>
         </div>
-
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="text-xs text-gray-600 dark:text-gray-400">Overlap</label>
-            <span className="text-xs font-mono text-gray-500">{chunkOverlap}</span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={500}
-            step={25}
-            value={chunkOverlap}
-            onChange={(e) => onChunkSettingsChange?.({ ragChunkOverlap: Number(e.target.value) })}
-            className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-blue-600"
-          />
-          <div className="flex justify-between text-[10px] text-gray-400">
-            <span>0</span>
-            <span>500</span>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Upload progress */}
       {uploading && progress && (
@@ -298,7 +349,7 @@ export function RAGSettingsSection({
       )}
 
       {/* Document list with chunk inspector */}
-      {documents.length > 0 && (
+      {showDocumentsList && documents.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">{documents.length} document{documents.length !== 1 ? 's' : ''}</span>
@@ -403,9 +454,11 @@ export function RAGSettingsSection({
         </div>
       )}
 
-      <p className="text-xs text-gray-500">
-        Documents are embedded using OpenAI and stored locally in your browser. The AI can search them using the rag_search tool.
-      </p>
+      {(showUploadArea || showDocumentsList) && (
+        <p className="text-xs text-gray-500">
+          Documents are embedded using OpenAI and stored locally in your browser. The AI can search them using the rag_search tool.
+        </p>
+      )}
     </div>
   );
 }

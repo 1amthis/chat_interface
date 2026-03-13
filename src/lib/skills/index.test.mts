@@ -78,6 +78,39 @@ test('discoverProjectSkills returns an empty list when the workspace has no skil
   }
 });
 
+test('discoverProjectSkills ignores YAML frontmatter when extracting descriptions', async () => {
+  const workspaceRoot = await createWorkspace();
+
+  try {
+    await createSkill(
+      workspaceRoot,
+      'release-notes',
+      [
+        '---',
+        'name: release-notes',
+        'description: Draft release notes from change summaries.',
+        '---',
+        '',
+        '# Release notes',
+        '',
+        'Summarize recent changes into concise release notes.',
+      ].join('\n')
+    );
+
+    const skills = await discoverProjectSkills(workspaceRoot);
+
+    assert.deepEqual(skills, [
+      {
+        name: 'release-notes',
+        description: 'Summarize recent changes into concise release notes.',
+        hasAdditionalFiles: false,
+      },
+    ]);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('discoverProjectSkills skips symlinked skill directories that escape the workspace', async () => {
   const workspaceRoot = await createWorkspace();
   const outsideRoot = await createWorkspace();

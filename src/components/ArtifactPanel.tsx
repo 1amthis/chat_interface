@@ -182,7 +182,7 @@ export function ArtifactPanel({
     return null;
   }
 
-  const showCodeToggle = ['html', 'react', 'svg', 'mermaid', 'markdown', 'document', 'spreadsheet', 'presentation'].includes(artifact.type);
+  const showCodeToggle = ['html', 'svg', 'mermaid', 'markdown', 'document', 'spreadsheet', 'presentation'].includes(artifact.type);
   const isBusy = isGeneratingPdf || isExporting;
 
   return (

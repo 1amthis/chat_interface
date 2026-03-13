@@ -46,3 +46,6 @@ next-env.d.ts
 
 # temporary directories
 mcp_app/
+
+# local project skills used by the chat interface
+.claude/skills/

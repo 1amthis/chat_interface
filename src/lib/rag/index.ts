@@ -8,7 +8,7 @@
 import { RAGDocument, RAGSearchResult, RAGUploadProgress } from './types';
 import { RAGChunk } from './types';
 import { chunkText, ChunkOptions } from './chunker';
-import { embedTexts, embedQuery } from './embeddings';
+import { embedTexts, embedQuery, DEFAULT_EMBEDDING_MODEL, type EmbeddingModel } from './embeddings';
 import {
   storeDocument,
   storeChunks,
@@ -33,7 +33,8 @@ export async function uploadDocument(
   file: File,
   openaiKey: string,
   onProgress?: (progress: RAGUploadProgress) => void,
-  chunkOptions?: ChunkOptions
+  chunkOptions?: ChunkOptions,
+  embeddingModel: EmbeddingModel = DEFAULT_EMBEDDING_MODEL
 ): Promise<RAGDocument> {
   // Determine file extension
   const ext = file.name.split('.').pop()?.toLowerCase() || '';
@@ -83,7 +84,7 @@ export async function uploadDocument(
   for (let i = 0; i < chunks.length; i += 20) {
     const batch = chunks.slice(i, i + 20);
     onProgress?.({ stage: 'embedding', current: i, total: chunks.length });
-    const batchEmbeddings = await embedTexts(batch, openaiKey);
+    const batchEmbeddings = await embedTexts(batch, openaiKey, embeddingModel);
     embeddings.push(...batchEmbeddings);
   }
   onProgress?.({ stage: 'embedding', current: chunks.length, total: chunks.length });
@@ -98,6 +99,7 @@ export async function uploadDocument(
     type: file.type || 'text/plain',
     size: file.size,
     chunkCount: chunks.length,
+    embeddingModel,
     createdAt: Date.now(),
   };
 
@@ -106,6 +108,7 @@ export async function uploadDocument(
     documentId,
     content,
     embedding: embeddings[i],
+    embeddingModel,
     position: i,
   }));
 
@@ -129,31 +132,56 @@ export async function removeDocument(documentId: string): Promise<void> {
 export async function searchRAG(
   query: string,
   openaiKey: string,
-  options?: { limit?: number; minScore?: number }
+  options?: {
+    limit?: number;
+    minScore?: number;
+    mode?: 'vector' | 'hybrid';
+    hybridAlpha?: number;
+    bm25K1?: number;
+    bm25B?: number;
+    embeddingModel?: EmbeddingModel;
+  }
 ): Promise<RAGSearchResult[]> {
   if (!query || !query.trim()) {
     return [];
   }
 
+  const embeddingModel = options?.embeddingModel ?? DEFAULT_EMBEDDING_MODEL;
+
   const [queryEmbedding, chunks, documents] = await Promise.all([
-    embedQuery(query, openaiKey),
+    embedQuery(query, openaiKey, embeddingModel),
     getAllChunks(),
     getAllDocuments(),
   ]);
 
-  if (chunks.length === 0) {
+  const filteredChunks = chunks.filter((chunk) => {
+    if (chunk.embeddingModel) {
+      return chunk.embeddingModel === embeddingModel;
+    }
+    return embeddingModel === DEFAULT_EMBEDDING_MODEL;
+  });
+
+  if (filteredChunks.length === 0) {
     return [];
   }
 
   // Build document name lookup
   const documentNames = new Map<string, string>();
   for (const doc of documents) {
-    documentNames.set(doc.id, doc.name);
+    const docModel = doc.embeddingModel || DEFAULT_EMBEDDING_MODEL;
+    if (docModel === embeddingModel) {
+      documentNames.set(doc.id, doc.name);
+    }
   }
 
-  return searchChunks(queryEmbedding, chunks, documentNames, {
+  return searchChunks(queryEmbedding, filteredChunks, documentNames, {
     limit: options?.limit ?? 5,
     minScore: options?.minScore,
+    mode: options?.mode ?? 'hybrid',
+    hybridAlpha: options?.hybridAlpha,
+    bm25K1: options?.bm25K1,
+    bm25B: options?.bm25B,
+    queryText: query,
   });
 }
 
@@ -167,11 +195,33 @@ export async function listDocuments(): Promise<RAGDocument[]> {
 /**
  * Get RAG store statistics
  */
-export async function getRAGStats(): Promise<{
+export async function getRAGStats(options?: { embeddingModel?: EmbeddingModel }): Promise<{
   documentCount: number;
   chunkCount: number;
 }> {
-  return getStats();
+  const baseStats = await getStats();
+  const embeddingModel = options?.embeddingModel;
+  if (!embeddingModel) {
+    return baseStats;
+  }
+
+  const [documents, chunks] = await Promise.all([
+    getAllDocuments(),
+    getAllChunks(),
+  ]);
+
+  const matchingDocIds = new Set(
+    documents
+      .filter((doc) => (doc.embeddingModel || DEFAULT_EMBEDDING_MODEL) === embeddingModel)
+      .map((doc) => doc.id)
+  );
+
+  const matchingChunks = chunks.filter((chunk) => matchingDocIds.has(chunk.documentId));
+
+  return {
+    documentCount: matchingDocIds.size,
+    chunkCount: matchingChunks.length,
+  };
 }
 
 /**
